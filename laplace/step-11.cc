@@ -37,7 +37,7 @@
 #include <deal.II/numerics/vector_tools.h>
 #include <deal.II/numerics/matrix_tools.h>
 #include <deal.II/numerics/data_out.h>
-
+#include <deal.II/lac/linear_operator_tools.h>
 #include <deal.II/lac/dynamic_sparsity_pattern.h>
 
 #include <algorithm>
@@ -105,10 +105,13 @@ namespace Step11
       boundary_dofs.nth_index_in_set(0);
 
     mean_value_constraints.clear();
+    if (false)
+    {
     mean_value_constraints.add_line(first_boundary_dof);
     for (types::global_dof_index i : boundary_dofs)
       if (i != first_boundary_dof)
         mean_value_constraints.add_entry(first_boundary_dof, i, -1);
+    }
     mean_value_constraints.close();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -171,18 +174,59 @@ namespace Step11
                            std::fabs(norm - std::sqrt(3.14159265358 / 2)));
   }
 
+  template <typename Range, typename Domain, typename Payload>
+  LinearOperator<Range, Domain, Payload>
+  my_operator(const LinearOperator<Range, Domain, Payload> &op)
+  {
+      LinearOperator<Range, Domain, Payload> return_op;
+
+      return_op.reinit_range_vector  = op.reinit_range_vector;
+      return_op.reinit_domain_vector = op.reinit_domain_vector;
+
+      return_op.vmult = [&](Range &dest, const Domain &src) {
+          std::cout << "before vmult" << std::endl;
+          op.vmult(dest, src);
+          std::cout << "after vmult" << std::endl;
+      };
+
+      return_op.vmult_add = [&](Range &dest, const Domain &src) {
+          std::cout << "before vmult_add" << std::endl;
+          op.vmult_add(dest, src);
+          std::cout << "after vmult_add" << std::endl;
+      };
+
+      return_op.Tvmult = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult" << std::endl;
+          op.Tvmult(dest, src);
+          std::cout << "after Tvmult" << std::endl;
+      };
+
+      return_op.Tvmult_add = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult_add" << std::endl;
+          op.Tvmult_add(dest, src);
+          std::cout << "after Tvmult_add" << std::endl;
+      };
+
+      return return_op;
+  }
 
 
   template <int dim>
   void LaplaceProblem<dim>::solve()
   {
-    SolverControl            solver_control(1000, 1e-12);
-    SolverCG<Vector<double>> cg(solver_control);
+    using VectorType = Vector<double>;
+
+    SolverControl            solver_control(1000, 1e-12*system_rhs.l2_norm(), true);
+    SolverCG<VectorType> cg(solver_control);
 
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    cg.solve(system_matrix, solution, system_rhs, preconditioner);
+    auto matrix_op = my_operator(linear_operator(system_matrix));
+
+    auto prec_op = my_operator(linear_operator(preconditioner));
+
+    cg.solve(matrix_op, solution, system_rhs, prec_op);
   }
 
 
@@ -237,9 +281,10 @@ int main()
 {
   try
     {
+      dealii::deallog.depth_console(99);
       std::cout.precision(5);
 
-      for (unsigned int mapping_degree = 1; mapping_degree <= 3;
+      for (unsigned int mapping_degree = 1; mapping_degree <= 1;
            ++mapping_degree)
         Step11::LaplaceProblem<2>(mapping_degree).run();
     }
