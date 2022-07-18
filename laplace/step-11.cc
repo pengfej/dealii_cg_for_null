@@ -17,6 +17,18 @@
  * Author: Wolfgang Bangerth, University of Heidelberg, 2001
  */
 
+/*
+
+- get working with one vector in the nullspace
+- test a) use 1 for boundary dofs, 0 else
+- test b) use all 1.
+- move project() into Nullspace struct
+- try out GMRES
+
+- put into ASPECT
+
+ */
+
 
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/function.h>
@@ -105,8 +117,9 @@ namespace Step11
       boundary_dofs.nth_index_in_set(0);
 
     mean_value_constraints.clear();
-    if (false)
+    if (false) // disabled
     {
+      // add a constraint to get mean 0 on boundary!
     mean_value_constraints.add_line(first_boundary_dof);
     for (types::global_dof_index i : boundary_dofs)
       if (i != first_boundary_dof)
@@ -174,9 +187,19 @@ namespace Step11
                            std::fabs(norm - std::sqrt(3.14159265358 / 2)));
   }
 
-  template <typename Range, typename Domain, typename Payload>
+
+  template <class VectorType>
+struct Nullspace
+{
+  std::vector<VectorType> basis;
+
+};
+  
+  
+  template <typename Range, typename Domain, typename Payload, class VectorType>
   LinearOperator<Range, Domain, Payload>
-  my_operator(const LinearOperator<Range, Domain, Payload> &op)
+  project_out_nullspace_operator(const LinearOperator<Range, Domain, Payload> &op,
+				 Nullspace<VectorType> &nullspace)
   {
       LinearOperator<Range, Domain, Payload> return_op;
 
@@ -185,13 +208,18 @@ namespace Step11
 
       return_op.vmult = [&](Range &dest, const Domain &src) {
           std::cout << "before vmult" << std::endl;
-          op.vmult(dest, src);
+          op.vmult(dest, src);   // dest = Phi(src)
           std::cout << "after vmult" << std::endl;
+
+	  // TODO project:
+	  nullspace.basis.size();
+	    nullspace.basis[i];
+	  
       };
 
       return_op.vmult_add = [&](Range &dest, const Domain &src) {
           std::cout << "before vmult_add" << std::endl;
-          op.vmult_add(dest, src);
+          op.vmult_add(dest, src);  // dest += Phi(src)
           std::cout << "after vmult_add" << std::endl;
       };
 
@@ -222,9 +250,12 @@ namespace Step11
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    auto matrix_op = my_operator(linear_operator(system_matrix));
+    Nullspace<VectorType> nullspace;
+    nullspace.basis.push_back(x);
+    // 
+    auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
 
-    auto prec_op = my_operator(linear_operator(preconditioner));
+    auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
     cg.solve(matrix_op, solution, system_rhs, prec_op);
   }
