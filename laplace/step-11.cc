@@ -189,17 +189,16 @@ namespace Step11
 
 
   template <class VectorType>
-struct Nullspace
-{
-  std::vector<VectorType> basis;
-
-};
+  struct Nullspace
+  {
+    std::vector<VectorType> basis;
+  };
   
   
   template <typename Range, typename Domain, typename Payload, class VectorType>
   LinearOperator<Range, Domain, Payload>
   project_out_nullspace_operator(const LinearOperator<Range, Domain, Payload> &op,
-				 Nullspace<VectorType> &nullspace)
+				                         Nullspace<VectorType> &nullspace)
   {
       LinearOperator<Range, Domain, Payload> return_op;
 
@@ -211,9 +210,17 @@ struct Nullspace
           op.vmult(dest, src);   // dest = Phi(src)
           std::cout << "after vmult" << std::endl;
 
-	  // TODO project:
-	  nullspace.basis.size();
-	    nullspace.basis[i];
+          // Pseduocode:
+
+          // Projection.
+
+          std::cout << "Doing Projection!" << std::endl;
+          for i = 1:nullspace.basis.size()
+            {
+            src -= (src*nullspace.basis[i])*nullspace.basis[i];
+            }
+          std::cout << "Projection Done." << std::endl;
+
 	  
       };
 
@@ -250,9 +257,26 @@ struct Nullspace
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
+
+
+    // Defining Nullspace.
     Nullspace<VectorType> nullspace;
-    nullspace.basis.push_back(x);
-    // 
+    Vector<double> nullvector;
+
+    // Adding vector into nullspace.
+
+
+    // This is not a genetic case. This construction is for mean value boundary null space.
+    nullvector.reinit(dof_handler.n_dofs());
+    const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
+    for (types::global_dof_index i : boundary_dofs)
+    {
+      nullvector[i] += 1 / sqrt(boundary_dofs); // Normalizing nullvector.
+    }
+    nullspace.basis.push_back(nullvector);
+
+
+
     auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
 
     auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
