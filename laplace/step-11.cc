@@ -207,20 +207,20 @@ namespace Step11
       return_op.reinit_domain_vector = op.reinit_domain_vector;
 
       return_op.vmult = [&](Range &dest, const Domain &src) {
-          std::cout << "before vmult" << std::endl;
+          //std::cout << "before vmult" << std::endl;
           op.vmult(dest, src);   // dest = Phi(src)
-          std::cout << "after vmult" << std::endl;
+          //std::cout << "after vmult" << std::endl;
 
           // Change 2.
           // Projection.
-          std::cout << "Doing Projection!" << std::endl;
+          //std::cout << "Doing Projection!" << std::endl;
           for (long unsigned int i = 0; i < nullspace.basis.size(); i++)
             {
-              double inner_product = nullspace.basis[i]*dest;
-              nullspace.basis[i].equ(inner_product, nullspace.basis[i]);
-              dest.add( -1, nullspace.basis[i]);
+              double inner_product = nullspace.basis[i]*src/nullspace.basis[i].l2_norm();
+              VectorType projection_vector = nullspace.basis[i] * inner_product;
+              dest.add( -1, projection_vector);
             }
-          std::cout << "Projection Done." << std::endl;
+          //std::cout << "Projection Done." << std::endl;
 
 	  
       };
@@ -269,12 +269,15 @@ namespace Step11
     const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
     for (types::global_dof_index i : boundary_dofs)
     {
-      nullvector[i] += 1 / std::sqrt(boundary_dofs.n_elements()); // Normalizing nullvector.
+      nullvector[i] += 1 ; // Normalizing nullvector.
     }
     nullspace.basis.push_back(nullvector);
 
     auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
     auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
+
+    // auto matrix_op = my_operator(linear_operator(system_matrix));
+    // auto prec_op = my_operator(linear_operator(preconditioner));
 
     cg.solve(matrix_op, solution, system_rhs, prec_op);
   }
