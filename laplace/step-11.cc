@@ -276,9 +276,6 @@ namespace Step11
     auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
     auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
-    // auto matrix_op = my_operator(linear_operator(system_matrix));
-    // auto prec_op = my_operator(linear_operator(preconditioner));
-
     cg.solve(matrix_op, solution, system_rhs, prec_op);
   }
 
