@@ -187,17 +187,18 @@ namespace Step11
                            std::fabs(norm - std::sqrt(3.14159265358 / 2)));
   }
 
-
+  // Change 1
   template <class VectorType>
   struct Nullspace
   {
     std::vector<VectorType> basis;
   };
+  // End of change 1.
   
   
   template <typename Range, typename Domain, typename Payload, class VectorType>
   LinearOperator<Range, Domain, Payload>
-  project_out_nullspace_operator(const LinearOperator<Range, Domain, Payload> &op,
+  my_operator(const LinearOperator<Range, Domain, Payload> &op,
 				                         Nullspace<VectorType> &nullspace)
   {
       LinearOperator<Range, Domain, Payload> return_op;
@@ -210,14 +211,14 @@ namespace Step11
           op.vmult(dest, src);   // dest = Phi(src)
           std::cout << "after vmult" << std::endl;
 
-          // Pseduocode:
-
+          // Change 2.
           // Projection.
-
           std::cout << "Doing Projection!" << std::endl;
-          for i = 1:nullspace.basis.size()
+          for (long unsigned int i = 0; i < nullspace.basis.size(); i++)
             {
-            src -= (src*nullspace.basis[i])*nullspace.basis[i];
+              double inner_product = nullspace.basis[i]*dest;
+              nullspace.basis[i].equ(inner_product, nullspace.basis[i]);
+              dest.add( -1, nullspace.basis[i]);
             }
           std::cout << "Projection Done." << std::endl;
 
@@ -258,28 +259,25 @@ namespace Step11
     preconditioner.initialize(system_matrix, 1.2);
 
 
-
+    // Change 3
     // Defining Nullspace.
     Nullspace<VectorType> nullspace;
-    Vector<double> nullvector;
-
-    // Adding vector into nullspace.
-
+    VectorType nullvector;
 
     // This is not a genetic case. This construction is for mean value boundary null space.
     nullvector.reinit(dof_handler.n_dofs());
     const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
     for (types::global_dof_index i : boundary_dofs)
     {
-      nullvector[i] += 1 / sqrt(boundary_dofs); // Normalizing nullvector.
+      nullvector[i] += 1 / std::sqrt(boundary_dofs.n_elements()); // Normalizing nullvector.
     }
     nullspace.basis.push_back(nullvector);
 
-
-
     auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
-
     auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
+
+    // auto matrix_op = my_operator(linear_operator(system_matrix));
+    // auto prec_op = my_operator(linear_operator(preconditioner));
 
     cg.solve(matrix_op, solution, system_rhs, prec_op);
   }
