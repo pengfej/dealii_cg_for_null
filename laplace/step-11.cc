@@ -37,6 +37,7 @@
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/solver_cg.h>
+#include <deal.II/lac/solver_gmres.h>
 #include <deal.II/lac/precondition.h>
 #include <deal.II/lac/affine_constraints.h>
 #include <deal.II/grid/tria.h>
@@ -211,18 +212,12 @@ namespace Step11
           op.vmult(dest, src);   // dest = Phi(src)
           //std::cout << "after vmult" << std::endl;
 
-          // Change 2.
           // Projection.
-          //std::cout << "Doing Projection!" << std::endl;
-          for (long unsigned int i = 0; i < nullspace.basis.size(); i++)
+          for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
             {
-              double inner_product = nullspace.basis[i]*src/nullspace.basis[i].l2_norm();
-              VectorType projection_vector = nullspace.basis[i] * inner_product;
-              dest.add( -1, projection_vector);
+              double inner_product = nullspace.basis[i]*dest;
+	      dest.add( -1.0*inner_product, nullspace.basis[i]);
             }
-          //std::cout << "Projection Done." << std::endl;
-
-	  
       };
 
       return_op.vmult_add = [&](Range &dest, const Domain &src) {
@@ -252,34 +247,55 @@ namespace Step11
   {
     using VectorType = Vector<double>;
 
-    SolverControl            solver_control(1000, 1e-12*system_rhs.l2_norm(), true);
-    SolverCG<VectorType> cg(solver_control);
+    SolverControl            solver_control(1000, 1e-12*system_rhs.l2_norm(), false);
+    //SolverGMRES<VectorType> solver(solver_control);
+    SolverCG<VectorType> solver(solver_control);
 
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-
-    // Change 3
     // Defining Nullspace.
     Nullspace<VectorType> nullspace;
     VectorType nullvector;
 
     // This is not a genetic case. This construction is for mean value boundary null space.
     nullvector.reinit(dof_handler.n_dofs());
-    const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
-    for (types::global_dof_index i : boundary_dofs)
-    {
-      nullvector[i] += 1 ; // Normalizing nullvector.
-    }
+    if (true)
+      {
+	// nullspace is 1 everywhere:
+	for (unsigned int i=0;i<dof_handler.n_dofs();++i)
+	  {
+	    nullvector[i] += 1.0;
+	  }
+      }
+    else
+      {
+	// nullspace is 1 on boundary:
+	const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
+        for (types::global_dof_index i : boundary_dofs)
+	  {
+	    nullvector[i] += 1.0;
+	  }
+      }
+
+    // normalize and add:
+    nullvector /= nullvector.l2_norm();
     nullspace.basis.push_back(nullvector);
 
-    auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
+
+    // original matrix, but projector after preconditioner
+    auto matrix_op = //my_operator(linear_operator(system_matrix), nullspace);
+      linear_operator(system_matrix);
     auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
-    // auto matrix_op = my_operator(linear_operator(system_matrix));
-    // auto prec_op = my_operator(linear_operator(preconditioner));
-
-    cg.solve(matrix_op, solution, system_rhs, prec_op);
+    if (true)
+      {
+	// remove nullspace from RHS
+	double r=system_rhs*nullvector;
+	system_rhs.add(-1.0*r, nullvector);
+	std::cout << "r=" << r << std::endl;
+      }
+    solver.solve(matrix_op, solution, system_rhs, prec_op);
   }
 
 
