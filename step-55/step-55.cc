@@ -18,29 +18,22 @@
  */
 
 #include <deal.II/base/quadrature_lib.h>
+#include <deal.II/lac/block_linear_operator.h>
+#include <deal.II/lac/linear_operator.h>
 #include <deal.II/base/function.h>
 #include <deal.II/base/timer.h>
-
-// The following chunk out code is identical to step-40 and allows
-// switching between PETSc and Trilinos:
-
+#include <deal.II/lac/petsc_block_sparse_matrix.h>
 #include <deal.II/lac/generic_linear_algebra.h>
+#include <deal.II/lac/petsc_block_vector.h>
 
-/* #define FORCE_USE_OF_TRILINOS */
+// /* #define FORCE_USE_OF_TRILINOS */
 
 namespace LA
 {
-#if defined(DEAL_II_WITH_PETSC) && !defined(DEAL_II_PETSC_WITH_COMPLEX) && \
-  !(defined(DEAL_II_WITH_TRILINOS) && defined(FORCE_USE_OF_TRILINOS))
-  using namespace dealii::LinearAlgebraPETSc;
-#  define USE_PETSC_LA
-#elif defined(DEAL_II_WITH_TRILINOS)
   using namespace dealii::LinearAlgebraTrilinos;
-#else
-#  error DEAL_II_WITH_PETSC or DEAL_II_WITH_TRILINOS required
-#endif
 } // namespace LA
 
+#include <deal.II/lac/linear_operator_tools.h>
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/solver_cg.h>
@@ -77,6 +70,13 @@ namespace LA
 #include <cmath>
 #include <fstream>
 #include <iostream>
+
+template <class VectorType>
+  struct Nullspace
+  {
+    std::vector<VectorType> basis;
+  };
+  // End of change 1.
 
 namespace Step55
 {
@@ -143,12 +143,13 @@ namespace Step55
 
     // The class A template class for a simple block diagonal preconditioner
     // for 2x2 matrices.
-    template <class PreconditionerA, class PreconditionerS>
+    template <class PreconditionerA, class PreconditionerS, typename VectorType>
     class BlockDiagonalPreconditioner : public Subscriptor
     {
     public:
       BlockDiagonalPreconditioner(const PreconditionerA &preconditioner_A,
-                                  const PreconditionerS &preconditioner_S);
+                                  const PreconditionerS &preconditioner_S,
+                                  const Nullspace<VectorType> &nullspace);
 
       void vmult(LA::MPI::BlockVector &      dst,
                  const LA::MPI::BlockVector &src) const;
@@ -156,24 +157,36 @@ namespace Step55
     private:
       const PreconditionerA &preconditioner_A;
       const PreconditionerS &preconditioner_S;
+      const Nullspace<VectorType> &nullspace;
+
     };
 
-    template <class PreconditionerA, class PreconditionerS>
-    BlockDiagonalPreconditioner<PreconditionerA, PreconditionerS>::
+    template <class PreconditionerA, class PreconditionerS, typename VectorType>
+    BlockDiagonalPreconditioner<PreconditionerA, PreconditionerS, VectorType>::
       BlockDiagonalPreconditioner(const PreconditionerA &preconditioner_A,
-                                  const PreconditionerS &preconditioner_S)
+                                  const PreconditionerS &preconditioner_S,
+                                  const Nullspace<VectorType> &nullspace)
       : preconditioner_A(preconditioner_A)
       , preconditioner_S(preconditioner_S)
+      , nullspace(nullspace)
     {}
 
 
-    template <class PreconditionerA, class PreconditionerS>
-    void BlockDiagonalPreconditioner<PreconditionerA, PreconditionerS>::vmult(
+    template <class PreconditionerA, class PreconditionerS, typename VectorType>
+    void BlockDiagonalPreconditioner<PreconditionerA, PreconditionerS, VectorType>::vmult(
       LA::MPI::BlockVector &      dst,
       const LA::MPI::BlockVector &src) const
     {
       preconditioner_A.vmult(dst.block(0), src.block(0));
       preconditioner_S.vmult(dst.block(1), src.block(1));
+
+      // Projection for block(0).
+      double inner_product1 = nullspace.basis[0].block(0)*dst.block(0);
+      dst.block(0).add( -1.0*inner_product1, nullspace.basis[0].block(0));
+
+      // Projection for block(1).
+      double inner_product2 = nullspace.basis[0].block(1)*dst.block(1);
+      dst.block(1).add( -1.0*inner_product2, nullspace.basis[0].block(1));
     }
 
   } // namespace LinearSolvers
@@ -571,7 +584,60 @@ namespace Step55
     system_matrix.compress(VectorOperation::add);
     preconditioner_matrix.compress(VectorOperation::add);
     system_rhs.compress(VectorOperation::add);
+
+
   }
+
+
+  // ====================================================================================
+  
+  
+  
+  // template <typename Range, typename Domain, typename Payload, class VectorType>
+  // BlockLinearOperator<Range, Domain, Payload>
+  // my_operator(const BlockLinearOperator<Range, Domain, Payload> &op,
+	// 			                         Nullspace<VectorType> &nullspace)
+  // {
+  //     BlockLinearOperator<Range, Domain, Payload> return_op;
+
+
+  //     return_op.reinit_range_vector  = op.reinit_range_vector; 
+  //     return_op.reinit_domain_vector = op.reinit_domain_vector;
+
+  //     return_op.vmult = [&](Range &dest, const Domain &src) {
+  //         op.vmult(dest, src);   // dest = Phi(src)
+
+  //         // Projection.
+  //         // for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
+  //         //   {
+  //         //     double inner_product = nullspace.basis[i]*dest;
+	//         //     dest.add( -1.0*inner_product, nullspace.basis[i]);
+  //         //   }
+  //     };
+
+  //     // return_op.vmult_add = [&](Range &dest, const Domain &src) {
+  //     //     std::cout << "before vmult_add" << std::endl;
+  //     //     op.vmult_add(dest, src);  // dest += Phi(src)
+  //     //     std::cout << "after vmult_add" << std::endl;
+  //     // };
+
+  //     // return_op.Tvmult = [&](Domain &dest, const Range &src) {
+  //     //     std::cout << "before Tvmult" << std::endl;
+  //     //     op.Tvmult(dest, src);
+  //     //     std::cout << "after Tvmult" << std::endl;
+  //     // };
+
+  //     // return_op.Tvmult_add = [&](Domain &dest, const Range &src) {
+  //     //     std::cout << "before Tvmult_add" << std::endl;
+  //     //     op.Tvmult_add(dest, src);
+  //     //     std::cout << "after Tvmult_add" << std::endl;
+  //     // };
+
+  //     return return_op;
+  // }
+// ====================================================================================
+
+
 
 
 
@@ -585,6 +651,38 @@ namespace Step55
   void StokesProblem<dim>::solve()
   {
     TimerOutput::Scope t(computing_timer, "solve");
+
+    
+// ====================================================================================
+
+    // Defining Nullspace.
+  using MatrixType  = dealii::TrilinosWrappers::BlockSparseMatrix;
+  using VectorType  = dealii::TrilinosWrappers::MPI::BlockVector;
+  using PayloadType = dealii::TrilinosWrappers::internal::LinearOperatorImplementation::TrilinosPayload;
+  using PayloadVectorType = typename PayloadType::VectorType;
+  using size_type         = dealii::types::global_dof_index;
+
+    Nullspace<VectorType> nullspace;
+    VectorType nullvector;
+
+    // Designing the null space vector with block(0) and block(1)
+
+    nullvector.reinit(system_rhs);
+    nullvector.block(0).add(0.0);
+    nullvector.block(1).add(1.0);
+
+    // normalize and add:
+    nullvector /= nullvector.l2_norm();
+    nullspace.basis.push_back(nullvector);
+
+
+    // remove nullspace from RHS
+    double r=system_rhs*nullvector;
+    system_rhs.add(-1.0*r, nullvector);
+    std::cout << "r=" << r << std::endl;
+    
+
+// ====================================================================================
 
     LA::MPI::PreconditionAMG prec_A;
     {
@@ -614,8 +712,9 @@ namespace Step55
     // This constructs the block preconditioner based on the preconditioners
     // for the individual blocks defined above.
     const LinearSolvers::BlockDiagonalPreconditioner<LA::MPI::PreconditionAMG,
-                                                     mp_inverse_t>
-      preconditioner(prec_A, mp_inverse);
+                                                     mp_inverse_t,
+                                                     VectorType>
+      preconditioner(prec_A, mp_inverse, nullspace);
 
     // With that, we can finally set up the linear solver and solve the system:
     SolverControl solver_control(system_matrix.m(),
@@ -627,6 +726,18 @@ namespace Step55
                                               mpi_communicator);
 
     constraints.set_zero(distributed_solution);
+
+    
+    // original matrix, but projector after preconditioner
+    // auto matrix_op = block_operator(system_matrix);
+    // auto prec_op   = my_operator(block_operator(preconditioner), nullspace);
+    // solver.solve(matrix_op, 
+                  // distributed_solution, 
+                  // system_rhs, 
+                  // prec_op);
+
+
+
 
     solver.solve(system_matrix,
                  distributed_solution,
