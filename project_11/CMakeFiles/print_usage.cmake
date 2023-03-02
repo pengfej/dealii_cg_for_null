@@ -2,7 +2,7 @@ MESSAGE(
 "###
 #
 #  Project  step-11  set up with  deal.II-9.5.0-pre  found at
-#      /home/testinf/Works/DEALII/installed
+#      /usr/local
 #
 #  CMAKE_BUILD_TYPE:          Debug
 #
@@ -10,8 +10,6 @@ MESSAGE(
 #       $ make                - to compile and link the program
 #       $ make run            - to (compile, link and) run the program
 #
-#       $ make debug          - to switch the build type to 'Debug'
-#       $ make release        - to switch the build type to 'Release'
 #
 #       $ make edit_cache     - to change (cached) configuration variables
 #                               and rerun the configure and generate phases of CMake

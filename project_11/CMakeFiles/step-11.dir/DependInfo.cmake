@@ -1,14 +1,28 @@
-
-# Consider dependencies only in project.
-set(CMAKE_DEPENDS_IN_PROJECT_ONLY OFF)
-
 # The set of languages for which implicit dependencies are needed:
 set(CMAKE_DEPENDS_LANGUAGES
+  "CXX"
+  )
+# The set of files for implicit dependencies of each language:
+set(CMAKE_DEPENDS_CHECK_CXX
+  "/home/testinf/dealii_cg_for_null/project_11/step-11.cc" "/home/testinf/dealii_cg_for_null/project_11/CMakeFiles/step-11.dir/step-11.cc.o"
+  )
+set(CMAKE_CXX_COMPILER_ID "GNU")
+
+# Preprocessor definitions for this target.
+set(CMAKE_TARGET_DEFINITIONS_CXX
+  "BOOST_NO_AUTO_PTR"
+  "DEBUG"
   )
 
-# The set of dependency files which are needed:
-set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/home/testinf/Works/dealii_cg_for_null/project_11/step-11.cc" "CMakeFiles/step-11.dir/step-11.cc.o" "gcc" "CMakeFiles/step-11.dir/step-11.cc.o.d"
+# The include file search paths:
+set(CMAKE_CXX_TARGET_INCLUDE_PATH
+  "/usr/lib/x86_64-linux-gnu/openmpi/include/openmpi"
+  "/usr/lib/x86_64-linux-gnu/openmpi/include"
+  "/usr/include/trilinos"
+  "/usr/include/hdf5/openmpi"
+  "/usr/include/scotch"
+  "/usr/include/suitesparse"
+  "/usr/include/petsc"
   )
 
 # Targets to which this target links.

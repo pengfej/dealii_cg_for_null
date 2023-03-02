@@ -1,6 +1,5 @@
 file(REMOVE_RECURSE
   "CMakeFiles/step-11.dir/step-11.cc.o"
-  "CMakeFiles/step-11.dir/step-11.cc.o.d"
   "step-11"
   "step-11.pdb"
 )
