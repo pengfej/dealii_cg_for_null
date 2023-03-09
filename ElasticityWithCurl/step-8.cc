@@ -19,7 +19,6 @@
 
 
 // @sect3{Include files}
-
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/function.h>
 #include <deal.II/base/tensor.h>
@@ -62,6 +61,7 @@ namespace Step8
     void solve();
     void refine_grid();
     void output_results(const unsigned int cycle) const;
+    void setup_nullspace();
 
     Triangulation<dim> triangulation;
     DoFHandler<dim>    dof_handler;
@@ -224,6 +224,7 @@ namespace Step8
 
      
         cell->get_dof_indices(local_dof_indices);
+        // system_rhs.print(std::cout);
         constraints.distribute_local_to_global(
           cell_matrix, cell_rhs, local_dof_indices, system_matrix, system_rhs);
       }
@@ -233,13 +234,68 @@ namespace Step8
   void ElasticProblem<dim>::setup_nullspace()
   {
 
-    // Explicitly put down for each point (x_1, y_1) or (x_1, y_1, z_1) dimensional should depend on <dim>
+    // Interpolate and Evaluate Curl null space.
+    Vector<double> local_rotation(3, dofs_per_cell);
+    Vector<double> global_rotation;
 
-    // rotational null space.
+    global_rotation.reinit(3, dof_handler.n_dofs());
 
-    // Evaluate shape function at rotated data.
+    // \partial_2 U_3 - \partial_3 U_2 = \int_\Omega (\partial_2 (\sum \Phi_i U_i)_3 -  \partial_3 (\sum \Phi_i U_i)_2)
+    for (unsigned int l = 0; l < dim; ++l){
 
-    // Normalize the vector, put them in null operator.
+      // Loop over cells
+      for (auto &cell : dof_handler.active_cell_iterators()){
+
+        local_rotation = 0;
+
+        // Loop over component
+        for (const unsigned int i : fe_values.dof_indices()){
+          const unsigned int component_i = fe.system_to_component_index(i).first;
+          // Loop over Quadrature points
+          for (const unsigned int q_point : fe_values.quadrature_point_indices()){
+                                  // \partial_2 (\Phi_i)_3                      -   \partial_3 (\Phi_i)_2
+              local_rotation +=  (fe_values.shape_grad(l, q_point)[component_i] - fe_values.shape_grad(component_i, q_point)[l]) * fe_values.JxW(q_point);
+          }
+        }
+        cell->get_dof_indices(local_dof_indices);
+        constraints.distribute_local_to_global(local_rotation, , local_dof_indices, global_rotation);
+      }
+    }
+
+
+    // \partial_3 U_1 - \partial_1 U_3 = \int_\Omega (\partial_3 (\sum \Phi_i U_i)_1 -  \partial_1 (\sum \Phi_i U_i)_3)
+
+    // \partial_1 U_2 - \partial_2 U_1 = \int_\Omega (\partial_1 (\sum \Phi_i U_i)_2 -  \partial_2 (\sum \Phi_i U_i)_1)
+
+    // Interpolate translational null space.
+    // \int_\Omega (\Phi_i U_i)_1 = 0
+
+    Vector<double> local_translation(3, dofs_per_cell);
+    Vector<double> global_translation;
+    global_translation.reinit(3, dof_handler.n_dofs());
+
+
+    for (unsigned int l = 0; l < dim; ++l){
+
+      // Loop over cells
+      for (auto &cell : dof_handler.active_cell_iterators()){
+        
+        local_translation = 0;
+
+        // Loop over component
+        for (const unsigned int i : fe_values.dof_indices()){
+          const unsigned int component_i = fe.system_to_component_index(i).first;
+          // Loop over Quadrature points
+          for (const unsigned int q_point : fe_values.quadrature_point_indices()){
+            local_translation(l, i) += (  (l == component_i) ? (fe_values.shape_value(i, q_point)[component_i]) : (0)) * fe_values.JxW(q_point);
+            // If l = 0, it will be added to first vector, which corresponding to translational null space in x direction.      
+          }
+        }
+        cell->get_dof_indices(local_dof_indices);
+        constraints.distribute_local_to_global(local_translation, , local_dof_indices, global_translation);
+      }
+    }
+    
 
   }
 
@@ -249,7 +305,7 @@ namespace Step8
   {
     SolverControl            solver_control(1000, 1e-12);
     SolverCG<Vector<double>> cg(solver_control);
-
+    // SolverGMRES<Vector<double>> cg(solver_control);
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
@@ -314,7 +370,7 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 8; ++cycle)
+    for (unsigned int cycle = 0; cycle < 1; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 

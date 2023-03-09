@@ -177,6 +177,7 @@ namespace Step8
           {
             const unsigned int component_i =
               fe.system_to_component_index(i).first;
+              std::cout << "Component i is :" << component_i << std::endl;
 
             for (const unsigned int j : fe_values.dof_indices())
               {
@@ -228,21 +229,6 @@ namespace Step8
           cell_matrix, cell_rhs, local_dof_indices, system_matrix, system_rhs);
       }
   }
-
-  template <int dim>
-  void ElasticProblem<dim>::setup_nullspace()
-  {
-
-    // Explicitly put down for each point (x_1, y_1) or (x_1, y_1, z_1) dimensional should depend on <dim>
-
-    // rotational null space.
-
-    // Evaluate shape function at rotated data.
-
-    // Normalize the vector, put them in null operator.
-
-  }
-
 
   template <int dim>
   void ElasticProblem<dim>::solve()
