@@ -230,22 +230,35 @@ namespace Step8
       }
   }
 
+
+  // Only put down dim = 3
   template <int dim>
   void ElasticProblem<dim>::setup_nullspace()
   {
+    
+    QGauss<dim> quadrature_formula(fe.degree + 1);
+    FEValues<dim> fe_values(fe,
+                            quadrature_formula,
+                            update_values | update_gradients |
+                              update_quadrature_points | update_JxW_values);
+
+    const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
+    const unsigned int n_q_points    = quadrature_formula.size();
 
     // Interpolate and Evaluate Curl null space.
-    Vector<double> local_rotation(3, dofs_per_cell);
-    Vector<double> global_rotation;
+    FullMatrix<double> local_rotation(3, dofs_per_cell);
+    FullMatrix<double> global_rotation;
 
+    std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
     global_rotation.reinit(3, dof_handler.n_dofs());
 
     // \partial_2 U_3 - \partial_3 U_2 = \int_\Omega (\partial_2 (\sum \Phi_i U_i)_3 -  \partial_3 (\sum \Phi_i U_i)_2)
-    for (unsigned int l = 0; l < dim; ++l){
+    for (unsigned int l = 0; l < 2; ++l){
 
       // Loop over cells
       for (auto &cell : dof_handler.active_cell_iterators()){
 
+        fe_values.reinit(cell);
         local_rotation = 0;
 
         // Loop over component
@@ -258,7 +271,7 @@ namespace Step8
           }
         }
         cell->get_dof_indices(local_dof_indices);
-        constraints.distribute_local_to_global(local_rotation, , local_dof_indices, global_rotation);
+        constraints.distribute_local_to_global(local_rotation, local_dof_indices, global_rotation);
       }
     }
 
@@ -270,16 +283,17 @@ namespace Step8
     // Interpolate translational null space.
     // \int_\Omega (\Phi_i U_i)_1 = 0
 
-    Vector<double> local_translation(3, dofs_per_cell);
-    Vector<double> global_translation;
+    FullMatrix<double> local_translation(3, dofs_per_cell);
+    FullMatrix<double> global_translation;
     global_translation.reinit(3, dof_handler.n_dofs());
 
-
-    for (unsigned int l = 0; l < dim; ++l){
+    // For translation, do \int_\Omega u = 0
+    for (unsigned int l = 0; l < 2; ++l){
 
       // Loop over cells
       for (auto &cell : dof_handler.active_cell_iterators()){
         
+        fe_values.reinit(cell);
         local_translation = 0;
 
         // Loop over component
@@ -292,7 +306,7 @@ namespace Step8
           }
         }
         cell->get_dof_indices(local_dof_indices);
-        constraints.distribute_local_to_global(local_translation, , local_dof_indices, global_translation);
+        constraints.distribute_local_to_global(local_translation,local_dof_indices, global_translation);
       }
     }
     

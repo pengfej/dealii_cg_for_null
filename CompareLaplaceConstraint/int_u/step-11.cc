@@ -138,7 +138,7 @@ namespace Step11
 
         for (unsigned int q=0; q<n_q_points; ++q){
           for (unsigned int k = 0; k<dofs_per_cell; ++k){
-            local_constraint_vector[k] += fe_values.shape_value(k,q) + fe_values.JxW(q);
+            local_constraint_vector[k] += fe_values.shape_value(k,q) * fe_values.JxW(q);
             cell->get_dof_indices(local_dof_index);
             mean_value_constraints.distribute_local_to_global(local_constraint_vector, 
                                                               local_dof_index,
@@ -147,7 +147,8 @@ namespace Step11
         }
       }
     }
-    
+
+    global_constraint_vector.print(std::cout);
     mean_value_constraints.close();
     
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -318,7 +319,7 @@ namespace Step11
   {
     GridGenerator::hyper_ball(triangulation);
 
-    for (unsigned int cycle = 0; cycle < 6; ++cycle)
+    for (unsigned int cycle = 0; cycle < 2; ++cycle)
       {
         setup_system();
         assemble_and_solve();
@@ -344,7 +345,7 @@ int main()
       // dealii::deallog.depth_console(99);
       std::cout.precision(5);
 
-      for (unsigned int mapping_degree = 1; mapping_degree <= 3;
+      for (unsigned int mapping_degree = 1; mapping_degree <= 1;
            ++mapping_degree)
         Step11::LaplaceProblem<2>(mapping_degree).run();
     }
