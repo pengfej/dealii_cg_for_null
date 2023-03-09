@@ -245,71 +245,128 @@ namespace Step8
     const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
     const unsigned int n_q_points    = quadrature_formula.size();
 
-    // Interpolate and Evaluate Curl null space.
-    FullMatrix<double> local_rotation(3, dofs_per_cell);
-    FullMatrix<double> global_rotation;
+    if (dim == 3){
 
-    std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-    global_rotation.reinit(3, dof_handler.n_dofs());
+      // Interpolate and Evaluate Curl null space.
+      FullMatrix<double> local_rotation(3, dofs_per_cell);
+      FullMatrix<double> global_rotation;
 
-    // \partial_2 U_3 - \partial_3 U_2 = \int_\Omega (\partial_2 (\sum \Phi_i U_i)_3 -  \partial_3 (\sum \Phi_i U_i)_2)
-    for (unsigned int l = 0; l < 2; ++l){
+      std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+      global_rotation.reinit(3, dof_handler.n_dofs());
 
-      // Loop over cells
-      for (auto &cell : dof_handler.active_cell_iterators()){
+      // \partial_2 U_3 - \partial_3 U_2 = \int_\Omega (\partial_2 (\sum \Phi_i U_i)_3 -  \partial_3 (\sum \Phi_i U_i)_2)
+      for (unsigned int l = 0; l < 2; ++l){
 
-        fe_values.reinit(cell);
-        local_rotation = 0;
+        // Loop over cells
+        for (auto &cell : dof_handler.active_cell_iterators()){
 
-        // Loop over component
-        for (const unsigned int i : fe_values.dof_indices()){
-          const unsigned int component_i = fe.system_to_component_index(i).first;
-          // Loop over Quadrature points
-          for (const unsigned int q_point : fe_values.quadrature_point_indices()){
-                                  // \partial_2 (\Phi_i)_3                      -   \partial_3 (\Phi_i)_2
-              local_rotation +=  (fe_values.shape_grad(l, q_point)[component_i] - fe_values.shape_grad(component_i, q_point)[l]) * fe_values.JxW(q_point);
+          fe_values.reinit(cell);
+          local_rotation = 0;
+
+          // Loop over component
+          for (const unsigned int i : fe_values.dof_indices()){
+            const unsigned int component_i = fe.system_to_component_index(i).first;
+            // Loop over Quadrature points
+            for (const unsigned int q_point : fe_values.quadrature_point_indices()){
+                                    // \partial_2 (\Phi_i)_3                      -   \partial_3 (\Phi_i)_2
+                local_rotation(l,i) +=  (fe_values.shape_grad(l, q_point)[component_i] - fe_values.shape_grad(component_i, q_point)[l]) * fe_values.JxW(q_point);
+
+                // local_rotation(0,i) += (fe_values.shape_grad(1, q_point)[2] - fe_values.shape_grad(2, q_point)[1]) * fe_values.JxW(q_point);
+                // local_rotation(1,i) += (fe_values.shape_grad(2, q_point)[0] - fe_values.shape_grad(0, q_point)[2]) * fe_values.JxW(q_point);
+                // local_rotation(2,i) += (fe_values.shape_grad(0, q_point)[1] - fe_values.shape_grad(1, q_point)[0]) * fe_values.JxW(q_point);
+            }
           }
+          cell->get_dof_indices(local_dof_indices);
+          constraints.distribute_local_to_global(local_rotation, local_dof_indices, global_rotation);
         }
-        cell->get_dof_indices(local_dof_indices);
-        constraints.distribute_local_to_global(local_rotation, local_dof_indices, global_rotation);
+      }
+
+      // Interpolate translational null space.
+      // \int_\Omega (\Phi_i U_i)_1 = 0
+
+      FullMatrix<double> local_translation(3, dofs_per_cell);
+      FullMatrix<double> global_translation;
+      global_translation.reinit(3, dof_handler.n_dofs());
+
+      // For translation, do \int_\Omega u = 0
+      for (unsigned int l = 0; l < 2; ++l){
+
+        // Loop over cells
+        for (auto &cell : dof_handler.active_cell_iterators()){
+          
+          fe_values.reinit(cell);
+          local_translation = 0;
+
+          // Loop over component
+          for (const unsigned int i : fe_values.dof_indices()){
+            const unsigned int component_i = fe.system_to_component_index(i).first;
+            // Loop over Quadrature points
+            for (const unsigned int q_point : fe_values.quadrature_point_indices()){
+              local_translation(l, i) += (  (l == component_i) ? (fe_values.shape_value(i, q_point)[component_i]) : (0)) * fe_values.JxW(q_point);
+              // If l = 0, it will be added to first vector, which corresponding to translational null space in x direction.      
+            }
+          }
+          cell->get_dof_indices(local_dof_indices);
+          constraints.distribute_local_to_global(local_translation,local_dof_indices, global_translation);
+        }
+      }
+    } else {
+      // Interpolate and Evaluate Curl null space.
+      Vector<double> local_rotation(dofs_per_cell);
+      Vector<double> global_rotation;
+
+      std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+      global_rotation.reinit(dof_handler.n_dofs());
+
+      // \partial_2 U_1 - \partial_1 U_2 = \int_\Omega (\partial_2 (\sum \Phi_i U_i)_1 -  \partial_1 (\sum \Phi_i U_i)_2)
+        // Loop over cells
+        for (auto &cell : dof_handler.active_cell_iterators()){
+
+          fe_values.reinit(cell);
+          local_rotation = 0;
+
+          // Loop over component
+          for (const unsigned int i : fe_values.dof_indices()){
+            const unsigned int component_i = fe.system_to_component_index(i).first;
+            // Loop over Quadrature points
+            for (const unsigned int q_point : fe_values.quadrature_point_indices()){
+                local_rotation(i) += (fe_values.shape_grad(1, q_point)[0] - fe_values.shape_grad(0, q_point)[1]) * fe_values.JxW(q_point);
+            }
+          }
+          cell->get_dof_indices(local_dof_indices);
+          constraints.distribute_local_to_global(local_rotation, local_dof_indices, global_rotation);
+        }
+
+      // Interpolate translational null space.
+      // \int_\Omega (\Phi_i U_i)_1 = 0
+
+      FullMatrix<double> local_translation(2, dofs_per_cell);
+      FullMatrix<double> global_translation;
+      global_translation.reinit(2, dof_handler.n_dofs());
+
+      // For translation, do \int_\Omega u = 0
+      for (unsigned int l = 0; l < 1; ++l){
+
+        // Loop over cells
+        for (auto &cell : dof_handler.active_cell_iterators()){
+          
+          fe_values.reinit(cell);
+          local_translation = 0;
+
+          // Loop over component
+          for (const unsigned int i : fe_values.dof_indices()){
+            const unsigned int component_i = fe.system_to_component_index(i).first;
+            // Loop over Quadrature points
+            for (const unsigned int q_point : fe_values.quadrature_point_indices()){
+              local_translation(l, i) += (  (l == component_i) ? (fe_values.shape_value(i, q_point)[component_i]) : (0)) * fe_values.JxW(q_point);
+              // If l = 0, it will be added to first vector, which corresponding to translational null space in x direction.      
+            }
+          }
+          cell->get_dof_indices(local_dof_indices);
+          constraints.distribute_local_to_global(local_translation,local_dof_indices, global_translation);
+        }
       }
     }
-
-
-    // \partial_3 U_1 - \partial_1 U_3 = \int_\Omega (\partial_3 (\sum \Phi_i U_i)_1 -  \partial_1 (\sum \Phi_i U_i)_3)
-
-    // \partial_1 U_2 - \partial_2 U_1 = \int_\Omega (\partial_1 (\sum \Phi_i U_i)_2 -  \partial_2 (\sum \Phi_i U_i)_1)
-
-    // Interpolate translational null space.
-    // \int_\Omega (\Phi_i U_i)_1 = 0
-
-    FullMatrix<double> local_translation(3, dofs_per_cell);
-    FullMatrix<double> global_translation;
-    global_translation.reinit(3, dof_handler.n_dofs());
-
-    // For translation, do \int_\Omega u = 0
-    for (unsigned int l = 0; l < 2; ++l){
-
-      // Loop over cells
-      for (auto &cell : dof_handler.active_cell_iterators()){
-        
-        fe_values.reinit(cell);
-        local_translation = 0;
-
-        // Loop over component
-        for (const unsigned int i : fe_values.dof_indices()){
-          const unsigned int component_i = fe.system_to_component_index(i).first;
-          // Loop over Quadrature points
-          for (const unsigned int q_point : fe_values.quadrature_point_indices()){
-            local_translation(l, i) += (  (l == component_i) ? (fe_values.shape_value(i, q_point)[component_i]) : (0)) * fe_values.JxW(q_point);
-            // If l = 0, it will be added to first vector, which corresponding to translational null space in x direction.      
-          }
-        }
-        cell->get_dof_indices(local_dof_indices);
-        constraints.distribute_local_to_global(local_translation,local_dof_indices, global_translation);
-      }
-    }
-    
 
   }
 
