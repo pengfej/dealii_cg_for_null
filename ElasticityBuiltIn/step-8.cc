@@ -120,13 +120,63 @@ namespace Step8
     system_rhs.reinit(dof_handler.n_dofs());
 
     constraints.clear();
-    DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+    // DoFTools::make_hanging_node_constraints(dof_handler, constraints);
 
     // Dirchilet Boundary condition removed.
     // VectorTools::interpolate_boundary_values(dof_handler,
     //                                          0,
     //                                          Functions::ZeroFunction<dim>(dim),
     //                                          constraints);
+
+    QGauss<dim> quadrature_formula(fe.degree + 1);
+
+    FEValues<dim> fe_values(fe,
+                            quadrature_formula,
+                            update_values | update_gradients |
+                              update_quadrature_points | update_JxW_values);
+
+    // const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
+    // const unsigned int n_q_points    = quadrature_formula.size();
+
+
+    // ==================
+    // Define Null Space.
+    // ==================
+
+    // pick the first (any) cell.
+    typename DoFHandler<dim>::active_cell_iterator cell1 = dof_handler.begin_active();
+    fe_values.reinit(cell1);
+
+    // fix (x,y,z) component of first dof.
+    const types::global_dof_index first_dof =  fe_values.dof_indices()[0];
+
+    unsigned int index_x_0 = fe.component_to_system_index(0, first_dof);
+    unsigned int index_y_0 = fe.component_to_system_index(1, first_dof);
+    // unsigned int index_z_0 = fe.component_to_system_index(2, first_dof);
+    constraints.add_line(index_x_0);
+    constraints.add_line(index_y_0);
+    // constraints.add_line(index_z_0);
+
+    // fix x-component of second dof
+    const types::global_dof_index second_dof =  fe_values.dof_indices()[2];
+    unsigned int index_x_1 = fe.component_to_system_index(0, second_dof);
+    constraints.add_line(index_x_1);
+
+    // // fix y-component of third dof
+    // const types::global_dof_index third_dof =  fe_values.dof_indices()[2];
+    // unsigned int index_y_2 = fe.component_to_system_index(2, third_dof);
+    // constraints.add_line(index_y_2);
+
+    // // fix z-component of forth dof
+    // const types::global_dof_index forth_dof =  fe_values.dof_indices()[3];
+    // unsigned int index_z_3 = fe.component_to_system_index(0, forth_dof);
+    // constraints.add_line(index_z_3);
+
+    // ==================
+    // End of null space. 
+    // ==================
+
+    
     constraints.close();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -134,6 +184,8 @@ namespace Step8
                                     dsp,
                                     constraints,
                                     /*keep_constrained_dofs = */ false);
+
+    constraints.condense(dsp);
     sparsity_pattern.copy_from(dsp);
 
     system_matrix.reinit(sparsity_pattern);
@@ -236,28 +288,7 @@ namespace Step8
   void ElasticProblem<dim>::setup_nullspace()
   {
 
-    const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
-
-    // pick the first (any) cell.
-    typename DoFHandler<dim>::active_cell_iterator cell1 = dof_handler.begin_active();
-
-    DoFTools::extract_locally_active_dofs(dof_handler);
-    std::vector<types::global_dof_index> local_dof_index(dofs_per_cell);
-
-    // fix (x,y,z) component of first dof.
-    const types::global_dof_index first_dof =  local_dof_index[0];
-
-    // fix x-dir of second dof.
-    const types::global_dof_index second_dof =  local_dof_index[1];
-
-    // fix y-dir of third dof.
-    const types::global_dof_index third_dof =  local_dof_index[2];
-
-    // fix z-dir of forth dof.
-    const types::global_dof_index forth_dof =  local_dof_index[3];
-
-    // locate component or input a component mask
-
+   
   }
 
 
@@ -331,7 +362,7 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 1; ++cycle)
+    for (unsigned int cycle = 0; cycle < 8; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
