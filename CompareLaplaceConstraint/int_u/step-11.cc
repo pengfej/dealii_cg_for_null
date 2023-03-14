@@ -136,15 +136,16 @@ namespace Step11
         fe_values.reinit(cell);
         local_constraint_vector = 0;
 
-        for (unsigned int q=0; q<n_q_points; ++q){
+        for (unsigned int q=0; q<n_q_points; ++q)
           for (unsigned int k = 0; k<dofs_per_cell; ++k){
-            local_constraint_vector[k] += fe_values.shape_value(k,q) * fe_values.JxW(q);
-            cell->get_dof_indices(local_dof_index);
-            mean_value_constraints.distribute_local_to_global(local_constraint_vector, 
+            local_constraint_vector[k] += fe_values.shape_value(k,q) * fe_values.JxW(q);    
+          }        
+          
+          cell->get_dof_indices(local_dof_index);
+          mean_value_constraints.distribute_local_to_global(local_constraint_vector, 
                                                               local_dof_index,
                                                               global_constraint_vector);
-          }
-        }
+
       }
     }
 
@@ -294,6 +295,7 @@ namespace Step11
         system_rhs.add(-1.0*r, global_constraint_vector);
         // std::cout << "r=" << r << std::endl;
         solver.solve(matrix_op, solution, system_rhs, prec_op);
+        solution.print(std::cout);
         // solver.solve(matrix_op, solution, system_rhs, PreconditionIdentity());
       }
 
@@ -319,7 +321,7 @@ namespace Step11
   {
     GridGenerator::hyper_ball(triangulation);
 
-    for (unsigned int cycle = 0; cycle < 2; ++cycle)
+    for (unsigned int cycle = 0; cycle < 1; ++cycle)
       {
         setup_system();
         assemble_and_solve();

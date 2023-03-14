@@ -114,19 +114,20 @@ namespace Step11
     system_rhs.reinit(dof_handler.n_dofs());
 
     const IndexSet all_dofs = DoFTools::extract_dofs(dof_handler, ComponentMask());
-    // const types::global_dof_index first_dof = all_dofs.nth_index_in_set(0);
+    const types::global_dof_index first_dof = all_dofs.nth_index_in_set(0);
     mean_value_constraints.clear();
-    // mean_value_constraints.add_line(first_dof);
+    mean_value_constraints.add_line(first_dof);
 
-    // for (types::global_dof_index i : all_dofs)
-    //   if(i != first_dof)
-    //     mean_value_constraints.add_entry(first_dof, i, -1); 
-    //     // =================Error=====================
-    //     // Can't access some undistribute dof in dsp.
-    //     // ===========================================
+    for (types::global_dof_index i : all_dofs){
+      if(i != first_dof){
+        mean_value_constraints.add_entry(first_dof, i, -1);         
+      }
+    }
+
 
     mean_value_constraints.close();
-    
+    // mean_value_constraints.print(std::cout);
+
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
     DoFTools::make_sparsity_pattern(dof_handler, dsp);
     mean_value_constraints.condense(dsp);
@@ -267,13 +268,13 @@ namespace Step11
     using VectorType = Vector<double>;
 
     SolverControl            solver_control(1000, 1e-12*system_rhs.l2_norm());
-    SolverGMRES<VectorType> solver(solver_control);
-    // SolverCG<VectorType> solver(solver_control);
+    // SolverGMRES<VectorType> solver(solver_control);
+    SolverCG<VectorType> solver(solver_control);
 
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    if (true)
+    if (false)
       {
         
         // Defining Nullspace.
@@ -307,6 +308,7 @@ namespace Step11
         solver.solve(matrix_op, solution, system_rhs, prec_op);
       }
 
+      solver.solve(system_matrix, solution, system_rhs, preconditioner);
 
   }
 
@@ -341,7 +343,7 @@ int main()
       // dealii::deallog.depth_console(99);
       std::cout.precision(5);
 
-      for (unsigned int mapping_degree = 1; mapping_degree <= 3;
+      for (unsigned int mapping_degree = 1; mapping_degree <= 1;
            ++mapping_degree)
         Step11::LaplaceProblem<2>(mapping_degree).run();
     }

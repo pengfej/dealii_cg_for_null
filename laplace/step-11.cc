@@ -126,6 +126,7 @@ namespace Step11
       if (i != first_boundary_dof)
         mean_value_constraints.add_entry(first_boundary_dof, i, -1);
     }
+
     mean_value_constraints.close();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -188,139 +189,20 @@ namespace Step11
                            std::fabs(norm - std::sqrt(3.14159265358 / 2)));
   }
 
-  // Change 1
-  template <class VectorType>
-  struct Nullspace
-  {
-    std::vector<VectorType> basis;
-  };
-  // End of change 1.
-  
-  
-  template <typename Range, typename Domain, typename Payload, class VectorType>
-  LinearOperator<Range, Domain, Payload>
-  my_operator(const LinearOperator<Range, Domain, Payload> &op,
-				                         Nullspace<VectorType> &nullspace)
-  {
-      LinearOperator<Range, Domain, Payload> return_op;
-
-      return_op.reinit_range_vector  = op.reinit_range_vector;
-      return_op.reinit_domain_vector = op.reinit_domain_vector;
-
-      return_op.vmult = [&](Range &dest, const Domain &src) {
-          //std::cout << "before vmult" << std::endl;
-          op.vmult(dest, src);   // dest = Phi(src)
-          //std::cout << "after vmult" << std::endl;
-
-          // Projection.
-          for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
-            {
-              double inner_product = nullspace.basis[i]*dest;
-	      dest.add( -1.0*inner_product, nullspace.basis[i]);
-            }
-      };
-
-      return_op.vmult_add = [&](Range &dest, const Domain &src) {
-          std::cout << "before vmult_add" << std::endl;
-          op.vmult_add(dest, src);  // dest += Phi(src)
-          std::cout << "after vmult_add" << std::endl;
-      };
-
-      return_op.Tvmult = [&](Domain &dest, const Range &src) {
-          std::cout << "before Tvmult" << std::endl;
-          op.Tvmult(dest, src);
-          std::cout << "after Tvmult" << std::endl;
-      };
-
-      return_op.Tvmult_add = [&](Domain &dest, const Range &src) {
-          std::cout << "before Tvmult_add" << std::endl;
-          op.Tvmult_add(dest, src);
-          std::cout << "after Tvmult_add" << std::endl;
-      };
-
-      return return_op;
-  }
-
-
   template <int dim>
   void LaplaceProblem<dim>::solve()
   {
     using VectorType = Vector<double>;
 
     SolverControl            solver_control(1000, 1e-12*system_rhs.l2_norm(), false);
-    //SolverGMRES<VectorType> solver(solver_control);
-    SolverCG<VectorType> solver(solver_control);
+    SolverCG<VectorType>     solver(solver_control);
 
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    // Defining Nullspace.
-    Nullspace<VectorType> nullspace;
-    VectorType nullvector;
-
-    // This is not a genetic case. This construction is for mean value boundary null space.
-    nullvector.reinit(dof_handler.n_dofs());
-    if (true)
-      {
-	// nullspace is 1 everywhere:
-	for (unsigned int i=0;i<dof_handler.n_dofs();++i)
-	  {
-	    nullvector[i] += 1.0;
-	  }
-      }
-    else
-      {
-	// nullspace is 1 on boundary:
-	const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
-        for (types::global_dof_index i : boundary_dofs)
-	  {
-	    nullvector[i] += 1.0;
-	  }
-      }
-
-    // normalize and add:
-    nullvector /= nullvector.l2_norm();
-    nullspace.basis.push_back(nullvector);
-
-
-    // original matrix, but projector after preconditioner
-    auto matrix_op = //my_operator(linear_operator(system_matrix), nullspace);
-      linear_operator(system_matrix);
-    auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
-
-    if (true)
-      {
-	// remove nullspace from RHS
-	double r=system_rhs*nullvector;
-	system_rhs.add(-1.0*r, nullvector);
-	std::cout << "r=" << r << std::endl;
-      }
-    solver.solve(matrix_op, solution, system_rhs, prec_op);
+    // solver.solve(system_matrix, solution, system_rhs, preconditioner);
   }
 
-
-
-  template <int dim>
-  void LaplaceProblem<dim>::write_high_order_mesh(const unsigned cycle)
-  {
-    DataOut<dim> data_out;
-
-    DataOutBase::VtkFlags flags;
-    flags.write_higher_order_cells = true;
-    data_out.set_flags(flags);
-
-    data_out.attach_dof_handler(dof_handler);
-    data_out.add_data_vector(solution, "solution");
-
-    data_out.build_patches(mapping,
-                           mapping.get_degree(),
-                           DataOut<dim>::curved_inner_cells);
-
-    std::ofstream file("solution-c=" + std::to_string(cycle) +
-                       ".p=" + std::to_string(mapping.get_degree()) + ".vtu");
-
-    data_out.write_vtu(file);
-  }
 
 
   template <int dim>
@@ -332,7 +214,7 @@ namespace Step11
       {
         setup_system();
         assemble_and_solve();
-        write_high_order_mesh(cycle);
+        // write_high_order_mesh(cycle);
 
         triangulation.refine_global();
       }
@@ -342,7 +224,7 @@ namespace Step11
     output_table.write_text(std::cout);
     std::cout << std::endl;
   }
-} // namespace Step11
+} 
 
 
 
