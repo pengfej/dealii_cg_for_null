@@ -88,6 +88,7 @@ namespace Step11
     SparsityPattern           sparsity_pattern;
     SparseMatrix<double>      system_matrix;
     AffineConstraints<double> mean_value_constraints;
+    AffineConstraints<double> compute_global_constraint;
 
     Vector<double> solution;
     Vector<double> system_rhs;
@@ -119,7 +120,7 @@ namespace Step11
     const IndexSet all_dofs = DoFTools::extract_dofs(dof_handler, ComponentMask());
     const types::global_dof_index first_dof = all_dofs.nth_index_in_set(0);
     
-    mean_value_constraints.clear();
+    compute_global_constraint.clear();
     
     // constructing null vector.
     if (true){
@@ -147,23 +148,42 @@ namespace Step11
           
 
         cell->get_dof_indices(local_dof_index);
-        mean_value_constraints.distribute_local_to_global(local_constraint_vector, 
+        compute_global_constraint.distribute_local_to_global(local_constraint_vector, 
                                                             local_dof_index,
                                                             global_constraint_vector);
       }
     }
 
-    mean_value_constraints.add_line(first_dof);  
-    for (types::global_dof_index i : all_dofs )
-      if (i != first_dof)
-        mean_value_constraints.add_entry(first_dof, i, -1.0 * global_constraint_vector[i]);
-    
+    global_constraint_vector /= global_constraint_vector.l2_norm();
+    // global_constraint_vector /= global_constraint_vector[0];
 
-    mean_value_constraints.close();
-    
+    // global_constraint_vector.print(std::cout);
+
+    compute_global_constraint.close();
+
+    if (true){
+
+      //=====================================
+      // TODO : Need to divide each coef of 
+      // constraint by coef of first dof. 
+      // Not sure how to locate that
+      // tried global_constraint_vector[0] 
+      // but problem failed to converge.
+      //=====================================
+
+      mean_value_constraints.clear();
+      mean_value_constraints.add_line(first_dof);  
+      for (types::global_dof_index i : all_dofs )
+        if (i != first_dof)
+          mean_value_constraints.add_entry(first_dof, i, -1.0 * global_constraint_vector[i]);
+      mean_value_constraints.close();
+
+    }
+
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
     DoFTools::make_sparsity_pattern(dof_handler, dsp);
     mean_value_constraints.condense(dsp);
+    // compute_global_constraint.condense(dsp);
 
     sparsity_pattern.copy_from(dsp);
     system_matrix.reinit(sparsity_pattern);
@@ -296,8 +316,8 @@ namespace Step11
     using VectorType = Vector<double>;
 
     SolverControl            solver_control(1000, 1e-12*system_rhs.l2_norm());
-    SolverGMRES<VectorType> solver(solver_control);
-    // SolverCG<VectorType> solver(solver_control);
+    // SolverGMRES<VectorType> solver(solver_control);
+    SolverCG<VectorType> solver(solver_control);
 
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
@@ -354,7 +374,7 @@ namespace Step11
       {
         setup_system();
         assemble_and_solve();
-        write_high_order_mesh(cycle);
+        // write_high_order_mesh(cycle);
 
         triangulation.refine_global();
       }

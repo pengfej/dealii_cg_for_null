@@ -267,7 +267,7 @@ namespace Step11
 
     using VectorType = Vector<double>;
 
-    SolverControl            solver_control(1000, 1e-12*system_rhs.l2_norm());
+    SolverControl            solver_control(1000, 1e-6*system_rhs.l2_norm());
     // SolverGMRES<VectorType> solver(solver_control);
     SolverCG<VectorType> solver(solver_control);
 
@@ -317,7 +317,7 @@ namespace Step11
   {
     GridGenerator::hyper_ball(triangulation);
 
-    for (unsigned int cycle = 0; cycle < 6; ++cycle)
+    for (unsigned int cycle = 0; cycle < 5; ++cycle)
       {
         setup_system();
         assemble_and_solve();

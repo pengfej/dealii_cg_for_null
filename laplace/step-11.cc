@@ -118,7 +118,7 @@ namespace Step11
       boundary_dofs.nth_index_in_set(0);
 
     mean_value_constraints.clear();
-    if (false) // disabled
+    if (true) // disabled
     {
       // add a constraint to get mean 0 on boundary!
     mean_value_constraints.add_line(first_boundary_dof);
@@ -200,7 +200,7 @@ namespace Step11
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    // solver.solve(system_matrix, solution, system_rhs, preconditioner);
+    solver.solve(system_matrix, solution, system_rhs, preconditioner);
   }
 
 

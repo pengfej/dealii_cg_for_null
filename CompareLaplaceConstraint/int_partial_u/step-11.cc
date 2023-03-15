@@ -30,7 +30,9 @@
  */
 
 
+#include <deal.II/base/index_set.h>
 #include <deal.II/base/quadrature_lib.h>
+#include <deal.II/base/types.h>
 #include <deal.II/numerics/error_estimator.h>
 #include <deal.II/grid/grid_refinement.h>
 #include <deal.II/base/function.h>
@@ -74,9 +76,10 @@ namespace Step11
   private:
     void setup_system();
     void assemble_and_solve();
-    void solve();
-    // void write_high_order_mesh(const unsigned cycle);
     void refine_one_cell();
+    void write_high_order_mesh(const unsigned cycle);
+    void solve();
+
 
     Triangulation<dim> triangulation;
     FE_Q<dim>          fe;
@@ -86,9 +89,11 @@ namespace Step11
     SparsityPattern           sparsity_pattern;
     SparseMatrix<double>      system_matrix;
     AffineConstraints<double> mean_value_constraints;
+    AffineConstraints<double> compute_global_constraint;
 
     Vector<double> solution;
     Vector<double> system_rhs;
+    Vector<double> global_constraint_vector;
 
     TableHandler output_table;
   };
@@ -106,8 +111,6 @@ namespace Step11
               << "============================" << std::endl;
   }
 
-
-
   template <int dim>
   void LaplaceProblem<dim>::setup_system()
   {
@@ -115,113 +118,86 @@ namespace Step11
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
 
-    const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
     const IndexSet all_dofs = DoFTools::extract_dofs(dof_handler, ComponentMask());
-
-    const types::global_dof_index first_boundary_dof =
-      boundary_dofs.nth_index_in_set(0);
-
-    mean_value_constraints.clear();
-    // mean_value_constraints.add_line(first_boundary_dof);
-    // mean_value_constraints.add_entry(first_boundary_dof, 1, 1);
-
-
-    if (true) // disabled
-    {
-      // \int_\Omega \phi_i u_i = 0
-      const unsigned int gauss_degree = std::max(static_cast<unsigned int>(std::ceil(1. * (mapping.get_degree() + 1) / 2)),2U);
+    const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
+    const types::global_dof_index first_dof = all_dofs.nth_index_in_set(0);
+    
+    compute_global_constraint.clear();
+    
+    // constructing null vector.
+    if (true){
+      const unsigned int gauss_degree = std::max(static_cast<unsigned int>(
+                 std::ceil(1. * (mapping.get_degree() + 1) / 2)),
+               2U);
       QGauss<dim> quadrature_formula(gauss_degree);
-      FEValues<dim, dim> fe_values (mapping, fe, QGauss<dim>(gauss_degree), update_values | update_JxW_values );
+      FEValues<dim, dim> fe_values(mapping, fe, QGauss<dim>(gauss_degree), update_values | update_JxW_values );
 
       const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
       const unsigned int n_q_points = quadrature_formula.size();
 
-      std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+      std::vector<types::global_dof_index> local_dof_index(dofs_per_cell);
 
       Vector<double> local_constraint_vector(dofs_per_cell);
-      Vector<double> global_constraint_vector;
       global_constraint_vector.reinit(dof_handler.n_dofs());
-      
+
       for (const auto &cell : dof_handler.active_cell_iterators()){
         fe_values.reinit(cell);
         local_constraint_vector = 0;
 
-        for (unsigned int q=0; q < n_q_points; ++q){
-          for (unsigned int k=0; k < dofs_per_cell; ++k){
-              // New constraint: \int_\Omega \phi_i u_i = 0
-              local_constraint_vector[k] += fe_values.shape_value(k,q) * fe_values.JxW(q);
-              cell->get_dof_indices(local_dof_indices);
-              mean_value_constraints.distribute_local_to_global(local_constraint_vector,
-                                                                local_dof_indices,
-                                                                global_constraint_vector);             
-          }
-        }
+        for (unsigned int q=0; q<n_q_points; ++q)
+          for (unsigned int k = 0; k<dofs_per_cell; ++k)
+              local_constraint_vector[k] += fe_values.shape_value(k,q) * fe_values.JxW(q);    
+          
 
-
-        // local_constraint_vector.print(std::cout);
+        cell->get_dof_indices(local_dof_index);
+        compute_global_constraint.distribute_local_to_global(local_constraint_vector, 
+                                                            local_dof_index,
+                                                            global_constraint_vector);
       }
+    }
+    compute_global_constraint.close();
 
-      
-      global_constraint_vector.print(std::cout);
-      // std::cout << "constraint: " << std::endl;
-      // mean_value_constraints.print(std::cout);
+    if (true){
+      mean_value_constraints.clear();
+      mean_value_constraints.add_line(first_dof);  
+      for ( types::global_dof_index i : boundary_dofs )
+        if (i != first_dof)
+          mean_value_constraints.add_entry(first_dof, i, -1.0 * global_constraint_vector[i] / global_constraint_vector[0]);
+
+      mean_value_constraints.close();
     }
 
-    if (false){
-      //DoFTools::make_hanging_node_constraints(dof_handler, mean_value_constraints);
-      VectorTools::interpolate_boundary_values(dof_handler,
-                                                0,
-                                                Functions::ZeroFunction<dim>(),
-                                                mean_value_constraints);
-      std::cout << "constraint: " << std::endl;
-      mean_value_constraints.print(std::cout);
-    }
-
-    // std::cout <<"====Here's the mean value constraint=====" << std::endl;
-    // mean_value_constraints.print(std::cout);
-    // std::cout <<"===========end================" << std::endl;
-    mean_value_constraints.close();
     
-    // Storing constraints var for null space construction.
-    // for (unsigned int i=0; i < mean_value_constraints.n_constraints(); i++){
-    //   auto &tmp = mean_value_constraints.get_constraint_entries(i);
-    //   if (tmp){
-    //     std::cout << ' ' << *tmp.first << ":  "<< *tmp.second << '\n';
-    //   }
-  
-    // }
-
-    if (false){
-
-        // Collecting constraints into vector and full matrix.
-        FullMatrix<double> Null_vector_set_from_constraint(dof_handler.n_dofs(),
-                                                          mean_value_constraints.n_constraints());
-        unsigned int column_number = 0;
-        for (auto &line : mean_value_constraints.get_lines())
-        {
-          Null_vector_set_from_constraint.set(line.index, column_number, 1.0);
-          if (line.entries.size() > 0)
-            {
-              for (const std::pair<types::global_dof_index, double> &entry : line.entries)
-              {
-                  Null_vector_set_from_constraint.set( entry.first, column_number, (-1.0)*entry.second);
-              }
-
-              column_number += 1;
-            }
-        }
-        // Null_vector_set_from_constraint.print(std::cout);
-    }
-
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
     DoFTools::make_sparsity_pattern(dof_handler, dsp);
     mean_value_constraints.condense(dsp);
+    compute_global_constraint.condense(dsp);
 
     sparsity_pattern.copy_from(dsp);
     system_matrix.reinit(sparsity_pattern);
   }
 
+  template <int dim>
+  void LaplaceProblem<dim>::write_high_order_mesh(const unsigned cycle)
+  {
+    DataOut<dim> data_out;
 
+    DataOutBase::VtkFlags flags;
+    flags.write_higher_order_cells = true;
+    data_out.set_flags(flags);
+
+    data_out.attach_dof_handler(dof_handler);
+    data_out.add_data_vector(solution, "solution");
+
+    data_out.build_patches(mapping,
+                           mapping.get_degree(),
+                           DataOut<dim>::curved_inner_cells);
+
+    std::ofstream file("solution-c=" + std::to_string(cycle) +
+                       ".p=" + std::to_string(mapping.get_degree()) + ".vtu");
+
+    data_out.write_vtu(file);
+  }
 
   template <int dim>
   void LaplaceProblem<dim>::assemble_and_solve()
@@ -248,22 +224,11 @@ namespace Step11
       tmp);
     system_rhs += tmp;
 
-    // FullMatrix<double> tmp_full;
-    // tmp_full.copy_from(system_matrix);
-    // tmp_full.print(std::cout);
-
     mean_value_constraints.condense(system_matrix);
     mean_value_constraints.condense(system_rhs);
-
-
-    // std::cout << "=========================================" << std::endl;
-    // FullMatrix<double> tmp_full2;
-    // tmp_full2.copy_from(system_matrix);
-    // tmp_full2.print(std::cout);
-
     solve();
     mean_value_constraints.distribute(solution);
-
+    
     Vector<float> norm_per_cell(triangulation.n_active_cells());
     VectorTools::integrate_difference(mapping,
                                       dof_handler,
@@ -283,13 +248,11 @@ namespace Step11
                            std::fabs(norm - std::sqrt(3.14159265358 / 2)));
   }
 
-  // Change 1
   template <class VectorType>
   struct Nullspace
   {
     std::vector<VectorType> basis;
   };
-  // End of change 1.
   
   
   template <typename Range, typename Domain, typename Payload, class VectorType>
@@ -334,40 +297,6 @@ namespace Step11
       return return_op;
   }
 
-  // template <int dim>
-  // void LaplaceProblem<dim>::refine_one_cell(){
-
-  //   auto it = triangulation.active_cell_iterators().begin();
-  //   for (auto &cell : triangulation.active_cell_iterators())
-  //       {
-  //         if (cell == *it){
-  //           cell->set_refine_flag();
-  //         }
-  //       }
- 
-  //     triangulation.execute_coarsening_and_refinement();
-  // }
-
-  template <int dim>
-  void LaplaceProblem<dim>::refine_one_cell()
-  {
-    Vector<float> estimated_error_per_cell(triangulation.n_active_cells());
-
-    KellyErrorEstimator<dim>::estimate(dof_handler,
-                                      QGauss<dim - 1>(fe.degree + 1),
-                                      {},
-                                      solution,
-                                      estimated_error_per_cell);
-
-    GridRefinement::refine_and_coarsen_fixed_number(triangulation,
-                                                    estimated_error_per_cell,
-                                                    0.3,
-                                                    0.03);
-
-    triangulation.execute_coarsening_and_refinement();
-  }
-
-
   template <int dim>
   void LaplaceProblem<dim>::solve()
   {
@@ -375,7 +304,7 @@ namespace Step11
     using VectorType = Vector<double>;
 
     SolverControl            solver_control(1000, 1e-12*system_rhs.l2_norm());
-    //SolverGMRES<VectorType> solver(solver_control);
+    // SolverGMRES<VectorType> solver(solver_control);
     SolverCG<VectorType> solver(solver_control);
 
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
@@ -383,92 +312,59 @@ namespace Step11
 
     if (false)
       {
-        
 
         // Defining Nullspace.
         Nullspace<VectorType> nullspace;
-        VectorType nullvector;
+        // VectorType nullvector;
 
         // This is not a genetic case. This construction is for mean value boundary null space.
-        nullvector.reinit(dof_handler.n_dofs());
-        if (true)
-          {
-            // nullspace is 1 everywhere:
-            for (unsigned int i=0;i<dof_handler.n_dofs();++i)
-              {
-                nullvector[i] += 1.0;
-              }
-          }
-        else
-          {
-            // nullspace is 1 on boundary:
-            const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
-                  for (types::global_dof_index i : boundary_dofs)
-              {
-                nullvector[i] += 1.0;
-              }
-          }
-
-        // normalize and add:
-        nullvector /= nullvector.l2_norm();
-        nullspace.basis.push_back(nullvector);
-
-
+        // nullvector.reinit(dof_handler.n_dofs());
+        global_constraint_vector /= global_constraint_vector.l2_norm();
+        nullspace.basis.push_back(global_constraint_vector);
+        
         // original matrix, but projector after preconditioner
         auto matrix_op = //my_operator(linear_operator(system_matrix), nullspace);
           linear_operator(system_matrix);
         auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
         // remove nullspace from RHS
-        double r=system_rhs*nullvector;
-        system_rhs.add(-1.0*r, nullvector);
-        std::cout << "r=" << r << std::endl;
-
-        // std::cout << "Print Constraint before Solving" << std::endl;
-        // mean_value_constraints.print(std::cout);
-
+        double r=system_rhs*global_constraint_vector;
+        system_rhs.add(-1.0*r, global_constraint_vector);
+        // std::cout << "r=" << r << std::endl;
         solver.solve(matrix_op, solution, system_rhs, prec_op);
+        // solution.print(std::cout);
+        // solver.solve(matrix_op, solution, system_rhs, PreconditionIdentity());
       }
 
-//    solver.solve(system_matrix, solution, system_rhs, preconditioner);
-
+      solver.solve(system_matrix, solution, system_rhs, preconditioner);
   }
 
+  template <int dim>
+  void LaplaceProblem<dim>::refine_one_cell(){
 
-
-  // template <int dim>
-  // void LaplaceProblem<dim>::write_high_order_mesh(const unsigned cycle)
-  // {
-  //   DataOut<dim> data_out;
-
-  //   DataOutBase::VtkFlags flags;
-  //   flags.write_higher_order_cells = true;
-  //   data_out.set_flags(flags);
-
-  //   data_out.attach_dof_handler(dof_handler);
-  //   data_out.add_data_vector(solution, "solution");
-
-  //   data_out.build_patches(mapping,
-  //                          mapping.get_degree(),
-  //                          DataOut<dim>::curved_inner_cells);
-
-  //   std::ofstream file("solution-c=" + std::to_string(cycle) +
-  //                      ".p=" + std::to_string(mapping.get_degree()) + ".vtu");
-
-  //   data_out.write_vtu(file);
-  // }
-
+    auto it = triangulation.active_cell_iterators().begin();
+    for (auto &cell : triangulation.active_cell_iterators())
+        {
+          if (cell == *it){
+            cell->set_refine_flag();
+          }
+        }
+ 
+      triangulation.execute_coarsening_and_refinement();
+  }
 
   template <int dim>
   void LaplaceProblem<dim>::run()
   {
     GridGenerator::hyper_ball(triangulation);
 
-    for (unsigned int cycle = 0; cycle < 1; ++cycle)
+    for (unsigned int cycle = 0; cycle < 6; ++cycle)
       {
         setup_system();
         assemble_and_solve();
-        refine_one_cell();
+        // write_high_order_mesh(cycle);
+
+        triangulation.refine_global();
       }
 
 
@@ -490,7 +386,7 @@ int main()
       // dealii::deallog.depth_console(99);
       std::cout.precision(5);
 
-      for (unsigned int mapping_degree = 1; mapping_degree <= 2;
+      for (unsigned int mapping_degree = 1; mapping_degree <= 1;
            ++mapping_degree)
         Step11::LaplaceProblem<2>(mapping_degree).run();
     }
