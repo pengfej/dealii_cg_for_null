@@ -19,9 +19,14 @@
 
 
 // @sect3{Include files}
+#include <boost/range/detail/common.hpp>
+#include <deal.II/base/point.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/function.h>
 #include <deal.II/base/tensor.h>
+#include <deal.II/fe/component_mask.h>
+#include <deal.II/fe/mapping.h>
+#include <deal.II/fe/mapping_q.h>
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/sparse_matrix.h>
@@ -69,6 +74,7 @@ namespace Step8
     FESystem<dim> fe;
 
     AffineConstraints<double> constraints;
+    AffineConstraints<double> null_vector_constraint;
 
     SparsityPattern      sparsity_pattern;
     SparseMatrix<double> system_matrix;
@@ -85,6 +91,7 @@ namespace Step8
     AssertDimension(values.size(), points.size());
     Assert(dim >= 2, ExcNotImplemented());
 
+    const double scale = 1;
    
     Point<dim> point_1, point_2;
     point_1(0) = 0.5;
@@ -94,14 +101,16 @@ namespace Step8
       {
         if (((points[point_n] - point_1).norm_square() < 0.2 * 0.2) ||
             ((points[point_n] - point_2).norm_square() < 0.2 * 0.2))
-          values[point_n][0] = 1.0;
+          values[point_n][0] = scale*1.0;
         else
           values[point_n][0] = 0.0;
 
         if (points[point_n].norm_square() < 0.2 * 0.2)
-          values[point_n][1] = 1.0;
+          values[point_n][1] = scale*1.0;
         else
           values[point_n][1] = 0.0;
+      
+
       }
   }
 
@@ -135,48 +144,81 @@ namespace Step8
                             update_values | update_gradients |
                               update_quadrature_points | update_JxW_values);
 
-    // const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
-    // const unsigned int n_q_points    = quadrature_formula.size();
 
 
     // ==================
     // Define Null Space.
     // ==================
 
-    // pick the first (any) cell.
-    typename DoFHandler<dim>::active_cell_iterator cell1 = dof_handler.begin_active();
-    fe_values.reinit(cell1);
+    const Point<2, double> location_2d_x(1.0, 1.0);
+    const Point<2, double> location_2d_origin(-1.0, -1.0);
 
-    // fix (x,y,z) component of first dof.
-    const types::global_dof_index first_dof =  fe_values.dof_indices()[0];
+    ComponentMask x_direction(2, false);
+    x_direction.set(0, true);
+    ComponentMask y_direction(2, false);
+    y_direction.set(1, true);
+    MappingQ<2> mapping(2);
 
-    unsigned int index_x_0 = fe.component_to_system_index(0, first_dof);
-    unsigned int index_y_0 = fe.component_to_system_index(1, first_dof);
-    // unsigned int index_z_0 = fe.component_to_system_index(2, first_dof);
-    constraints.add_line(index_x_0);
-    constraints.add_line(index_y_0);
-    // constraints.add_line(index_z_0);
+    const auto &fe = dof_handler.get_fe();
+    const std::vector<Point<dim - 1>> &unit_support_points = fe.get_unit_face_support_points();
+    const Quadrature<dim - 1> quadrature(unit_support_points);
+    const unsigned int dofs_per_face = fe.dofs_per_face;
+    std::vector<types::global_dof_index> face_dofs(dofs_per_face);
 
-    // fix x-component of second dof
-    const types::global_dof_index second_dof =  fe_values.dof_indices()[2];
-    unsigned int index_x_1 = fe.component_to_system_index(0, second_dof);
-    constraints.add_line(index_x_1);
+    FEFaceValues<2, 2> fe_face_values(mapping,
+                                      fe,
+                                      quadrature,
+                                      update_quadrature_points);
 
-    // // fix y-component of third dof
-    // const types::global_dof_index third_dof =  fe_values.dof_indices()[2];
-    // unsigned int index_y_2 = fe.component_to_system_index(2, third_dof);
-    // constraints.add_line(index_y_2);
+    for (const auto &cell : dof_handler.active_cell_iterators())  
+        if (cell->at_boundary()
+            &&
+            (cell->is_locally_owned() || cell->is_ghost()))
+          for (unsigned int face_no = 0;
+               face_no < GeometryInfo<dim>::faces_per_cell; ++face_no)
+            if (cell->at_boundary(face_no))
+              {
+                const typename DoFHandler<2, 2>::face_iterator face = cell->face(face_no);
+                face->get_dof_indices(face_dofs);
+                fe_face_values.reinit(cell, face_no);
 
-    // // fix z-component of forth dof
-    // const types::global_dof_index forth_dof =  fe_values.dof_indices()[3];
-    // unsigned int index_z_3 = fe.component_to_system_index(0, forth_dof);
-    // constraints.add_line(index_z_3);
+                // bool found = false;
+                for (unsigned int i = 0; i < face_dofs.size(); ++i)
+                  {
+                    const unsigned int component = fe.face_system_to_component_index(i).first;
+                    if (x_direction[component])
+                      {
+                        const Point<dim> position = fe_face_values.quadrature_point(i);
+                        if (position.distance(location_2d_origin) < 1e-6*cell->diameter()){
+                            // found = true;
+                            if (!constraints.is_constrained(face_dofs[i]) &&
+                                constraints.can_store_line(face_dofs[i]) && constraints.n_constraints() < 3)
+                              constraints.add_line(face_dofs[i]);
+                          }
+                      } else if (y_direction[component]){
+                        const Point<dim> position = fe_face_values.quadrature_point(i);
+                        if (position.distance(location_2d_x) < 1e-6*cell->diameter())
+                          {
+                            if (!constraints.is_constrained(face_dofs[i]) &&
+                                constraints.can_store_line(face_dofs[i]) && constraints.n_constraints() < 3)
+                              constraints.add_line(face_dofs[i]);
+                          } else if (position.distance(location_2d_origin) < 1e-6*cell->diameter())
+                          {
+                            // found = true;
+                            if (!constraints.is_constrained(face_dofs[i]) &&
+                                constraints.can_store_line(face_dofs[i]) && constraints.n_constraints() < 3)
+                              constraints.add_line(face_dofs[i]);
+                          }
+                      }
+                      
+                  }
+              }
 
     // ==================
     // End of null space. 
     // ==================
 
-    
+    constraints.print(std::cout);
     constraints.close();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -331,38 +373,25 @@ namespace Step8
   {
     DataOut<dim> data_out;
     data_out.attach_dof_handler(dof_handler);
-
-    std::vector<std::string> solution_names;
-    switch (dim)
-      {
-        case 1:
-          solution_names.emplace_back("displacement");
-          break;
-        case 2:
-          solution_names.emplace_back("x_displacement");
-          solution_names.emplace_back("y_displacement");
-          break;
-        case 3:
-          solution_names.emplace_back("x_displacement");
-          solution_names.emplace_back("y_displacement");
-          solution_names.emplace_back("z_displacement");
-          break;
-        default:
-          Assert(false, ExcNotImplemented());
-      }
-
-    data_out.add_data_vector(solution, solution_names);
+ 
+  std::vector<std::string> solution_names(dim, "displacement");
+  std::vector<DataComponentInterpretation::DataComponentInterpretation>
+    interpretation(dim,
+                   DataComponentInterpretation::component_is_part_of_vector);
+  
+  data_out.add_data_vector(dof_handler,
+                           solution,
+                           solution_names,
+                           interpretation);
     data_out.build_patches();
 
     std::ofstream output("solution-" + std::to_string(cycle) + ".vtk");
     data_out.write_vtk(output);
   }
-
-
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 8; ++cycle)
+    for (unsigned int cycle = 0; cycle < 6; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 

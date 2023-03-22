@@ -89,6 +89,7 @@ namespace Step8
     AssertDimension(values.size(), points.size());
     Assert(dim >= 2, ExcNotImplemented());
 
+    const double scale = 1;
    
     Point<dim> point_1, point_2;
     point_1(0) = 0.5;
@@ -98,17 +99,18 @@ namespace Step8
       {
         if (((points[point_n] - point_1).norm_square() < 0.2 * 0.2) ||
             ((points[point_n] - point_2).norm_square() < 0.2 * 0.2))
-          values[point_n][0] = 1.0;
+          values[point_n][0] = scale*1.0;
         else
           values[point_n][0] = 0.0;
 
         if (points[point_n].norm_square() < 0.2 * 0.2)
-          values[point_n][1] = 1.0;
+          values[point_n][1] = scale*1.0;
         else
           values[point_n][1] = 0.0;
+      
+
       }
   }
-
 
   template <int dim>
   ElasticProblem<dim>::ElasticProblem()
@@ -262,7 +264,7 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::setup_nullspace()
   { 
-QGauss<dim> quadrature_formula(fe.degree + 1);
+    QGauss<dim> quadrature_formula(fe.degree + 1);
     FEValues<dim> fe_values(fe,
                             quadrature_formula,
                             update_values | update_gradients |
@@ -318,7 +320,7 @@ QGauss<dim> quadrature_formula(fe.degree + 1);
         }
 
         global_rotation /= global_rotation.l2_norm();
-        global_rotation /= global_rotation[0];
+        //global_rotation /= global_rotation[0];
 
       // Interpolate translational null space.
       // \int_\Omega (\Phi_i U_i)_1 = 0
@@ -357,10 +359,10 @@ QGauss<dim> quadrature_formula(fe.degree + 1);
           
         }
 
-        global_x_translation /= global_rotation.l2_norm();
-        global_x_translation /= global_rotation[0];        
-        global_y_translation /= global_rotation.l2_norm();
-        global_y_translation /= global_rotation[0];
+        global_x_translation /= global_x_translation.l2_norm();
+        //global_x_translation /= global_rotation[0];        
+        global_y_translation /= global_y_translation.l2_norm();
+        //global_y_translation /= global_rotation[0];
     }
    }
 
@@ -412,27 +414,16 @@ QGauss<dim> quadrature_formula(fe.degree + 1);
   {
     DataOut<dim> data_out;
     data_out.attach_dof_handler(dof_handler);
-
-    std::vector<std::string> solution_names;
-    switch (dim)
-      {
-        case 1:
-          solution_names.emplace_back("displacement");
-          break;
-        case 2:
-          solution_names.emplace_back("x_displacement");
-          solution_names.emplace_back("y_displacement");
-          break;
-        case 3:
-          solution_names.emplace_back("x_displacement");
-          solution_names.emplace_back("y_displacement");
-          solution_names.emplace_back("z_displacement");
-          break;
-        default:
-          Assert(false, ExcNotImplemented());
-      }
-
-    data_out.add_data_vector(solution, solution_names);
+ 
+  std::vector<std::string> solution_names(dim, "displacement");
+  std::vector<DataComponentInterpretation::DataComponentInterpretation>
+    interpretation(dim,
+                   DataComponentInterpretation::component_is_part_of_vector);
+  
+  data_out.add_data_vector(dof_handler,
+                           solution,
+                           solution_names,
+                           interpretation);
     data_out.build_patches();
 
     std::ofstream output("solution-" + std::to_string(cycle) + ".vtk");
@@ -443,7 +434,7 @@ QGauss<dim> quadrature_formula(fe.degree + 1);
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 1; ++cycle)
+    for (unsigned int cycle = 0; cycle < 6; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
@@ -454,7 +445,7 @@ QGauss<dim> quadrature_formula(fe.degree + 1);
           }
         else
           refine_grid();
-
+          
         std::cout << "   Number of active cells:       "
                   << triangulation.n_active_cells() << std::endl;
 
@@ -468,7 +459,7 @@ QGauss<dim> quadrature_formula(fe.degree + 1);
 
         assemble_system();
         solve();
-        // output_results(cycle);
+        output_results(cycle);
       }
   }
 }

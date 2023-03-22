@@ -165,6 +165,7 @@ namespace Step11
           mean_value_constraints.add_entry(first_dof, i, -1.0 * global_constraint_vector[i] / global_constraint_vector[0]);
 
       mean_value_constraints.close();
+      mean_value_constraints.print(std::cout);
     }
 
     
