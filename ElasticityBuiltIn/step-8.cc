@@ -91,11 +91,11 @@ namespace Step8
     AssertDimension(values.size(), points.size());
     Assert(dim >= 2, ExcNotImplemented());
 
-    const double scale = 1;
+    const double scale = 0.0;
    
     Point<dim> point_1, point_2;
-    point_1(0) = 0.5;
-    point_2(0) = -0.5;
+    point_1(0) = 0.0;
+    point_2(0) = -0.0;
 
     for (unsigned int point_n = 0; point_n < points.size(); ++point_n)
       {
@@ -128,6 +128,7 @@ namespace Step8
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
 
+    constraints.print(std::cout);
     constraints.clear();
     // DoFTools::make_hanging_node_constraints(dof_handler, constraints);
 
@@ -218,7 +219,6 @@ namespace Step8
     // End of null space. 
     // ==================
 
-    constraints.print(std::cout);
     constraints.close();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -317,10 +317,34 @@ namespace Step8
           }
 
      
+        for (const auto &face : cell->face_iterators())
+          if ((face->at_boundary()) && (face->boundary_id() == 1)){
+            // Left boundary has id 1.
+            fe_values.reinit(cell);
+            for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
+                { 
+                  for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                    cell_rhs(i) +=
+                      (fe_values.shape_value(i, q_point) * // phi_i(x_q)
+                       1.0 *                                  // g(x_q)
+                       fe_values.JxW(q_point));            // dx
+                }
+          } else if ((face->at_boundary()) && (face->boundary_id() == 2)){
+            // Right boundary has id 
+            fe_values.reinit(cell);
+            for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
+                { 
+                  for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                    cell_rhs(i) +=
+                      (fe_values.shape_value(i, q_point) *  // phi_i(x_q)
+                       -1.0 *                                 // g(x_q)
+                       fe_values.JxW(q_point));            // dx
+                }
+          }
+
         cell->get_dof_indices(local_dof_indices);
-        // system_rhs.print(std::cout);
-        constraints.distribute_local_to_global(
-          cell_matrix, cell_rhs, local_dof_indices, system_matrix, system_rhs);
+        constraints.distribute_local_to_global(cell_matrix,cell_rhs, local_dof_indices, system_matrix, system_rhs);
+
       }
   }
 
@@ -391,7 +415,7 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 6; ++cycle)
+    for (unsigned int cycle = 0; cycle < 7; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
@@ -399,6 +423,21 @@ namespace Step8
           {
             GridGenerator::hyper_cube(triangulation, -1, 1);
             triangulation.refine_global(4);
+            for (const auto &cell : triangulation.cell_iterators())
+              for (const auto &face : cell->face_iterators())
+                {
+                  if (face-> at_boundary()){
+                    const auto center = face->center();
+                    if ((std::fabs(center(0) - (-1.0)) < 1e-16) || (std::fabs(center(1) - (-1.0)) < 1e-16) ){
+                      // Left boundary.
+                      face->set_boundary_id(1);
+                    } else if ((std::fabs(center(0) - (1.0)) < 1e-16 || (std::fabs(center(1) - (1.0)) < 1e-16))){
+                      // Right boundary.
+                      face->set_boundary_id(2); 
+                    }
+                  }
+                }
+
           }
         else
           refine_grid();
