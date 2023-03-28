@@ -179,10 +179,14 @@ namespace Step11
                                         norm_per_cell,
                                         VectorTools::H1_seminorm);
 
+
+    double mean_value = VectorTools::compute_mean_value(mapping, dof_handler, QGauss<dim>(gauss_degree), solution, 0 );
+
     output_table.add_value("cells", triangulation.n_active_cells());
     output_table.add_value("|u|_1", norm);
     output_table.add_value("error",
                            std::fabs(norm - std::sqrt(3.14159265358 / 2)));
+    output_table.add_value("MeanValue", mean_value);
   }
 
   // Change 1
@@ -299,6 +303,7 @@ namespace Step11
     // screen:
     output_table.set_precision("|u|_1", 6);
     output_table.set_precision("error", 6);
+    output_table.set_precision("MeanValue", 6);
     output_table.write_text(std::cout);
     std::cout << std::endl;
   }
