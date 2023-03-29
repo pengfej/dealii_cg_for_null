@@ -120,8 +120,9 @@ namespace Step11
       boundary_dofs.nth_index_in_set(0);
 
     mean_value_constraints.clear();
-    mean_value_constraints.add_line(first_boundary_dof);
-    // mean_value_constraints.add_entry(first_boundary_dof, 0, 0);
+    if (false)
+      mean_value_constraints.add_line(first_boundary_dof);
+    
     mean_value_constraints.close();
     
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -253,7 +254,7 @@ namespace Step11
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    if (false)
+    if (true)
       {
         
         // Defining Nullspace.
@@ -281,7 +282,7 @@ namespace Step11
         solver.solve(matrix_op, solution, system_rhs, prec_op);
       }
 
-      solver.solve(system_matrix, solution, system_rhs, preconditioner);
+      // solver.solve(system_matrix, solution, system_rhs, preconditioner);
 
 
   }

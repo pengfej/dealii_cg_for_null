@@ -32,6 +32,7 @@
 
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/types.h>
+#include <deal.II/fe/fe_update_flags.h>
 #include <deal.II/numerics/error_estimator.h>
 #include <deal.II/grid/grid_refinement.h>
 #include <deal.II/base/function.h>
@@ -160,8 +161,8 @@ namespace Step11
     // global_constraint_vector.print(std::cout);
 
     compute_global_constraint.close();
-
-    if (true){
+      mean_value_constraints.clear();
+    if (false){
 
       //=====================================
       // TODO : Need to divide each coef of 
@@ -171,14 +172,13 @@ namespace Step11
       // but problem failed to converge.
       //=====================================
 
-      mean_value_constraints.clear();
       mean_value_constraints.add_line(first_dof);  
       for (types::global_dof_index i : all_dofs )
         if (i != first_dof)
           mean_value_constraints.add_entry(first_dof, i, -1.0 * global_constraint_vector[i]);
-      mean_value_constraints.close();
 
     }
+      mean_value_constraints.close();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
     DoFTools::make_sparsity_pattern(dof_handler, dsp);
@@ -325,7 +325,7 @@ namespace Step11
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    if (false)
+    if (true)
       {
 
         // Defining Nullspace.
@@ -336,6 +336,7 @@ namespace Step11
         // nullvector.reinit(dof_handler.n_dofs());
         global_constraint_vector /= global_constraint_vector.l2_norm();
         nullspace.basis.push_back(global_constraint_vector);
+        global_constraint_vector.print(std::cout);
         
         // original matrix, but projector after preconditioner
         auto matrix_op = //my_operator(linear_operator(system_matrix), nullspace);
@@ -351,7 +352,7 @@ namespace Step11
         // solver.solve(matrix_op, solution, system_rhs, PreconditionIdentity());
       }
 
-      solver.solve(system_matrix, solution, system_rhs, preconditioner);
+      // solver.solve(system_matrix, solution, system_rhs, preconditioner);
   }
 
   template <int dim>

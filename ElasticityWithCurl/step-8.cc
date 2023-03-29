@@ -41,6 +41,7 @@
 #include <deal.II/numerics/error_estimator.h>
 #include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_q.h>
+#include <deal.II/lac/linear_operator_tools.h>
 #include <fstream>
 #include <iostream>
 
@@ -346,7 +347,6 @@ namespace Step8
         }
 
         global_rotation /= global_rotation.l2_norm();
-        // global_rotation /= global_rotation[0];
 
       // Interpolate translational null space.
       // \int_\Omega (\Phi_i U_i)_1 = 0
@@ -385,12 +385,58 @@ namespace Step8
           
         }
 
-        global_x_translation /= global_x_translation.l2_norm();
-        // global_x_translation /= global_rotation[0];        
+        global_x_translation /= global_x_translation.l2_norm();   
         global_y_translation /= global_y_translation.l2_norm();
-        // global_y_translation /= global_rotation[0];
     }
    }
+   
+  template <class VectorType>
+  struct Nullspace
+  {
+    std::vector<VectorType> basis;
+  };
+   
+  template <typename Range, typename Domain, typename Payload, class VectorType>
+  LinearOperator<Range, Domain, Payload>
+  my_operator(const LinearOperator<Range, Domain, Payload> &op,
+				                         Nullspace<VectorType> &nullspace)
+  {
+      LinearOperator<Range, Domain, Payload> return_op;
+
+      return_op.reinit_range_vector  = op.reinit_range_vector;
+      return_op.reinit_domain_vector = op.reinit_domain_vector;
+
+      return_op.vmult = [&](Range &dest, const Domain &src) {
+          op.vmult(dest, src);   // dest = Phi(src)
+
+          // Projection.
+          for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
+            {
+              double inner_product = nullspace.basis[i]*dest;
+	            dest.add( -1.0*inner_product, nullspace.basis[i]);
+            }
+      };
+
+      return_op.vmult_add = [&](Range &dest, const Domain &src) {
+          std::cout << "before vmult_add" << std::endl;
+          op.vmult_add(dest, src);  // dest += Phi(src)
+          std::cout << "after vmult_add" << std::endl;
+      };
+
+      return_op.Tvmult = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult" << std::endl;
+          op.Tvmult(dest, src);
+          std::cout << "after Tvmult" << std::endl;
+      };
+
+      return_op.Tvmult_add = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult_add" << std::endl;
+          op.Tvmult_add(dest, src);
+          std::cout << "after Tvmult_add" << std::endl;
+      };
+
+      return return_op;
+  }
 
 
   template <int dim>
@@ -402,17 +448,47 @@ namespace Step8
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    
-    
-    std::cout << " condense system ! \n";
-    condensing_constraint.condense(system_matrix);
-    std::cout << " condensing rhs ! \n";
-    condensing_constraint.condense(system_rhs);
-    std::cout << "all good! \n";
+    if (false){
+      // std::cout << " condense system ! \n";
+      condensing_constraint.condense(system_matrix);
+      // std::cout << " condensing rhs ! \n";
+      condensing_constraint.condense(system_rhs);
+      // std::cout << "all good! \n";
 
-    cg.solve(system_matrix, solution, system_rhs, preconditioner);
+      cg.solve(system_matrix, solution, system_rhs, preconditioner);
+      condensing_constraint.distribute(solution);
+    }
 
-    condensing_constraint.distribute(solution);
+
+    // Operator implementation.
+    if (true){
+         // Defining Nullspace.
+        Nullspace<Vector<double>> nullspace;
+        // VectorType nullvector;
+
+        // This is not a genetic case. This construction is for mean value boundary null space.
+        // nullvector.reinit(dof_handler.n_dofs());
+        nullspace.basis.push_back(global_rotation);
+        nullspace.basis.push_back(global_x_translation);
+        nullspace.basis.push_back(global_y_translation);
+        
+        
+        // original matrix, but projector after preconditioner
+        auto matrix_op = linear_operator(system_matrix);
+        auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
+
+        // remove nullspace from RHS
+        double r_rotation=system_rhs*global_rotation;
+        system_rhs.add(-1.0*r_rotation, global_rotation);
+        double r_x=system_rhs*global_x_translation;
+        system_rhs.add(-1.0*r_x, global_x_translation);
+        double r_y=system_rhs*global_y_translation;
+        system_rhs.add(-1.0*r_y, global_y_translation);
+        system_rhs.print(std::cout);
+
+        cg.solve(matrix_op, solution, system_rhs, prec_op);
+    }
+
   }
 
 
@@ -491,9 +567,7 @@ namespace Step8
                   << triangulation.n_active_cells() << std::endl;
 
         setup_system();
-        std::cout << " ============= \n";
         setup_nullspace();
-        std::cout << " ============= \n";
 
         std::cout << "   Number of degrees of freedom: " << dof_handler.n_dofs()
                   << std::endl;

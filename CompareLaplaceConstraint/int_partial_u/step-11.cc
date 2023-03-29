@@ -145,6 +145,8 @@ namespace Step11
         fe_values.reinit(cell);
         local_constraint_vector = 0;
 
+        
+
         for (unsigned int q=0; q<n_q_points; ++q)
           for (unsigned int k = 0; k<dofs_per_cell; ++k)
               local_constraint_vector[k] += fe_values.shape_value(k,q) * fe_values.JxW(q);    
@@ -158,22 +160,22 @@ namespace Step11
     }
     compute_global_constraint.close();
 
-    if (true){
       mean_value_constraints.clear();
+    if (false){
       mean_value_constraints.add_line(first_dof);  
       for ( types::global_dof_index i : boundary_dofs )
         if (i != first_dof)
           mean_value_constraints.add_entry(first_dof, i, -1.0 * global_constraint_vector[i] / global_constraint_vector[0]);
 
-      mean_value_constraints.close();
-      mean_value_constraints.print(std::cout);
+      // mean_value_constraints.print(std::cout);
     }
+      mean_value_constraints.close();
 
     
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
     DoFTools::make_sparsity_pattern(dof_handler, dsp);
     mean_value_constraints.condense(dsp);
-    compute_global_constraint.condense(dsp);
+    // compute_global_constraint.condense(dsp);
 
     sparsity_pattern.copy_from(dsp);
     system_matrix.reinit(sparsity_pattern);
@@ -312,10 +314,11 @@ namespace Step11
     // SolverGMRES<VectorType> solver(solver_control);
     SolverCG<VectorType> solver(solver_control);
 
-    PreconditionSSOR<SparseMatrix<double>> preconditioner;
-    preconditioner.initialize(system_matrix, 1.2);
+    PreconditionJacobi<SparseMatrix<double>> preconditioner;
+    preconditioner.initialize(system_matrix, 1.0);
 
-    if (false)
+
+    if (true)
       {
 
         // Defining Nullspace.
@@ -324,24 +327,36 @@ namespace Step11
 
         // This is not a genetic case. This construction is for mean value boundary null space.
         // nullvector.reinit(dof_handler.n_dofs());
-        global_constraint_vector /= global_constraint_vector.l2_norm();
-        nullspace.basis.push_back(global_constraint_vector);
+        // global_constraint_vector /= global_constraint_vector.l2_norm();
+      
+        const IndexSet all_dofs = DoFTools::extract_dofs(dof_handler, ComponentMask());
+        const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
+
+        Vector<double> nullvec(dof_handler.n_dofs());
         
+        // nullspace.basis.push_back(global_constraint_vector);
+        for ( types::global_dof_index i : boundary_dofs )
+          nullvec[i] += global_constraint_vector[i];
+            // mean_value_constraints.add_entry(first_dof, i, -1.0 * global_constraint_vector[i] / global_constraint_vector[0]);
+        
+        nullvec /= nullvec.l2_norm();
+        nullspace.basis.push_back(nullvec);
+
         // original matrix, but projector after preconditioner
         auto matrix_op = //my_operator(linear_operator(system_matrix), nullspace);
           linear_operator(system_matrix);
         auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
         // remove nullspace from RHS
-        double r=system_rhs*global_constraint_vector;
-        system_rhs.add(-1.0*r, global_constraint_vector);
+        double r=system_rhs*nullvec;
+        system_rhs.add(-1.0*r, nullvec);
         // std::cout << "r=" << r << std::endl;
         solver.solve(matrix_op, solution, system_rhs, prec_op);
         // solution.print(std::cout);
         // solver.solve(matrix_op, solution, system_rhs, PreconditionIdentity());
       }
 
-      solver.solve(system_matrix, solution, system_rhs, preconditioner);
+      // solver.solve(system_matrix, solution, system_rhs, preconditioner);
   }
 
   template <int dim>

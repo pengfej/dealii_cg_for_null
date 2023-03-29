@@ -326,18 +326,18 @@ namespace Step8
                   for (unsigned int i = 0; i < dofs_per_cell; ++i)
                     cell_rhs(i) +=
                       (fe_values.shape_value(i, q_point) * // phi_i(x_q)
-                       1.0 *                                  // g(x_q)
+                       -1.0 *                                  // g(x_q)
                        fe_values.JxW(q_point));            // dx
                 }
           } else if ((face->at_boundary()) && (face->boundary_id() == 2)){
-            // Right boundary has id 
+            // Right boundary has id 2.
             fe_values.reinit(cell);
             for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
                 { 
                   for (unsigned int i = 0; i < dofs_per_cell; ++i)
                     cell_rhs(i) +=
                       (fe_values.shape_value(i, q_point) *  // phi_i(x_q)
-                       -1.0 *                                 // g(x_q)
+                       1.0 *                                 // g(x_q)
                        fe_values.JxW(q_point));            // dx
                 }
           }
@@ -428,10 +428,10 @@ namespace Step8
                 {
                   if (face-> at_boundary()){
                     const auto center = face->center();
-                    if ((std::fabs(center(0) - (-1.0)) < 1e-16) || (std::fabs(center(1) - (-1.0)) < 1e-16) ){
+                    if ( (std::fabs(center(0) - (-1.0)) < 1e-16) ){
                       // Left boundary.
                       face->set_boundary_id(1);
-                    } else if ((std::fabs(center(0) - (1.0)) < 1e-16 || (std::fabs(center(1) - (1.0)) < 1e-16))){
+                    } else if ( (std::fabs(center(0) - (1.0)) < 1e-16 ) ){
                       // Right boundary.
                       face->set_boundary_id(2); 
                     }

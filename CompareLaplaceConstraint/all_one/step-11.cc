@@ -117,12 +117,15 @@ namespace Step11
     const IndexSet all_dofs = DoFTools::extract_dofs(dof_handler, ComponentMask());
     const types::global_dof_index first_dof = all_dofs.nth_index_in_set(0);
     mean_value_constraints.clear();
-    mean_value_constraints.add_line(first_dof);
 
-    for (types::global_dof_index i : all_dofs){
-      if(i != first_dof){
-        mean_value_constraints.add_entry(first_dof, i, -1);         
+    if (true){
+      mean_value_constraints.add_line(first_dof);
+      for (types::global_dof_index i : all_dofs)
+      {
+        if(i != first_dof){
+          mean_value_constraints.add_entry(first_dof, i, -1);         
       }
+    }
     }
 
 
@@ -320,7 +323,7 @@ namespace Step11
   {
     GridGenerator::hyper_ball(triangulation);
 
-    for (unsigned int cycle = 0; cycle < 5; ++cycle)
+    for (unsigned int cycle = 0; cycle < 4; ++cycle)
       {
         setup_system();
         assemble_and_solve();
