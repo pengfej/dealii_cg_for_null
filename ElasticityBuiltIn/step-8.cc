@@ -130,7 +130,7 @@ namespace Step8
 
     constraints.print(std::cout);
     constraints.clear();
-    // DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+    DoFTools::make_hanging_node_constraints(dof_handler, constraints);
 
     // Dirchilet Boundary condition removed.
     // VectorTools::interpolate_boundary_values(dof_handler,
@@ -151,7 +151,7 @@ namespace Step8
     // Define Null Space.
     // ==================
 
-    const Point<2, double> location_2d_x(1.0, 1.0);
+    const Point<2, double> location_2d_x(1.0, -1.0);
     const Point<2, double> location_2d_origin(-1.0, -1.0);
 
     ComponentMask x_direction(2, false);
@@ -316,7 +316,8 @@ namespace Step8
                              fe_values.JxW(q_point);
           }
 
-     
+
+        // Boundary intergral implemenption 
         for (const auto &face : cell->face_iterators())
           if ((face->at_boundary()) && (face->boundary_id() == 1)){
             // Left boundary has id 1.
