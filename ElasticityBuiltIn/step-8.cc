@@ -130,7 +130,7 @@ namespace Step8
 
     constraints.print(std::cout);
     constraints.clear();
-    DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+    // DoFTools::make_hanging_node_constraints(dof_handler, constraints);
 
     // Dirchilet Boundary condition removed.
     // VectorTools::interpolate_boundary_values(dof_handler,
@@ -227,7 +227,7 @@ namespace Step8
                                     constraints,
                                     /*keep_constrained_dofs = */ false);
 
-    constraints.condense(dsp);
+    //constraints.condense(dsp);
     sparsity_pattern.copy_from(dsp);
 
     system_matrix.reinit(sparsity_pattern);
@@ -237,11 +237,16 @@ namespace Step8
   void ElasticProblem<dim>::assemble_system()
   {
     QGauss<dim> quadrature_formula(fe.degree + 1);
+    QGauss<dim-1> face_quadrature_formula(fe.degree + 1);
 
     FEValues<dim> fe_values(fe,
                             quadrature_formula,
                             update_values | update_gradients |
                               update_quadrature_points | update_JxW_values);
+
+    FEFaceValues<dim> fe_face_values(fe,
+                                     face_quadrature_formula,
+                                     update_values  | update_quadrature_points | update_JxW_values);
 
     const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
     const unsigned int n_q_points    = quadrature_formula.size();
@@ -316,30 +321,39 @@ namespace Step8
                              fe_values.JxW(q_point);
           }
 
-
-        // Boundary intergral implemenption 
+     
         for (const auto &face : cell->face_iterators())
           if ((face->at_boundary()) && (face->boundary_id() == 1)){
             // Left boundary has id 1.
-            fe_values.reinit(cell);
+            fe_face_values.reinit(cell,face);
             for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
                 { 
                   for (unsigned int i = 0; i < dofs_per_cell; ++i)
+		    {
+		      const unsigned int component_i =
+			    fe.system_to_component_index(i).first;
+		      if (component_i == 0)
                     cell_rhs(i) +=
-                      (fe_values.shape_value(i, q_point) * // phi_i(x_q)
+                      (fe_face_values.shape_value(i, q_point) * // phi_i(x_q)
                        -1.0 *                                  // g(x_q)
-                       fe_values.JxW(q_point));            // dx
+                       fe_face_values.JxW(q_point));            // dx
+		    }
                 }
           } else if ((face->at_boundary()) && (face->boundary_id() == 2)){
             // Right boundary has id 2.
-            fe_values.reinit(cell);
+            fe_face_values.reinit(cell,face);
             for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
                 { 
                   for (unsigned int i = 0; i < dofs_per_cell; ++i)
+		    {
+		      const unsigned int component_i =
+			    fe.system_to_component_index(i).first;
+		      if (component_i == 0)
                     cell_rhs(i) +=
-                      (fe_values.shape_value(i, q_point) *  // phi_i(x_q)
+                      (fe_face_values.shape_value(i, q_point) *  // phi_i(x_q)
                        1.0 *                                 // g(x_q)
-                       fe_values.JxW(q_point));            // dx
+                       fe_face_values.JxW(q_point));            // dx
+		    }
                 }
           }
 
@@ -423,7 +437,6 @@ namespace Step8
         if (cycle == 0)
           {
             GridGenerator::hyper_cube(triangulation, -1, 1);
-            triangulation.refine_global(4);
             for (const auto &cell : triangulation.cell_iterators())
               for (const auto &face : cell->face_iterators())
                 {
@@ -438,6 +451,7 @@ namespace Step8
                     }
                   }
                 }
+            triangulation.refine_global(4);
 
           }
         else
