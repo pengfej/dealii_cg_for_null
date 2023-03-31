@@ -128,9 +128,9 @@ namespace Step8
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
 
-    constraints.print(std::cout);
+    // constraints.print(std::cout);
     constraints.clear();
-    // DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+    DoFTools::make_hanging_node_constraints(dof_handler, constraints);
 
     // Dirchilet Boundary condition removed.
     // VectorTools::interpolate_boundary_values(dof_handler,
@@ -227,7 +227,7 @@ namespace Step8
                                     constraints,
                                     /*keep_constrained_dofs = */ false);
 
-    //constraints.condense(dsp);
+    constraints.condense(dsp);
     sparsity_pattern.copy_from(dsp);
 
     system_matrix.reinit(sparsity_pattern);
@@ -250,6 +250,7 @@ namespace Step8
 
     const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
     const unsigned int n_q_points    = quadrature_formula.size();
+    const unsigned int n_face_q_points = face_quadrature_formula.size();
 
     FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
     Vector<double>     cell_rhs(dofs_per_cell);
@@ -326,7 +327,7 @@ namespace Step8
           if ((face->at_boundary()) && (face->boundary_id() == 1)){
             // Left boundary has id 1.
             fe_face_values.reinit(cell,face);
-            for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
+            for (unsigned int q_point = 0; q_point < n_face_q_points; ++q_point)
                 { 
                   for (unsigned int i = 0; i < dofs_per_cell; ++i)
 		    {
@@ -342,7 +343,7 @@ namespace Step8
           } else if ((face->at_boundary()) && (face->boundary_id() == 2)){
             // Right boundary has id 2.
             fe_face_values.reinit(cell,face);
-            for (unsigned int q_point = 0; q_point < n_q_points; ++q_point)
+            for (unsigned int q_point = 0; q_point < n_face_q_points; ++q_point)
                 { 
                   for (unsigned int i = 0; i < dofs_per_cell; ++i)
 		    {
@@ -456,7 +457,7 @@ namespace Step8
           }
         else
           refine_grid();
-
+          
         std::cout << "   Number of active cells:       "
                   << triangulation.n_active_cells() << std::endl;
 
