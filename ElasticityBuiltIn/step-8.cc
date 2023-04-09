@@ -67,6 +67,7 @@ namespace Step8
     void refine_grid();
     void output_results(const unsigned int cycle) const;
     void setup_nullspace();
+    void interpoalte_translation_and_rotation();
 
     Triangulation<dim> triangulation;
     DoFHandler<dim>    dof_handler;
@@ -74,13 +75,17 @@ namespace Step8
     FESystem<dim> fe;
 
     AffineConstraints<double> constraints;
-    AffineConstraints<double> null_vector_constraint;
+    AffineConstraints<double> fixing_corner_constriant;
+    AffineConstraints<double> interpolating_constraint;
 
     SparsityPattern      sparsity_pattern;
     SparseMatrix<double> system_matrix;
 
     Vector<double> solution;
     Vector<double> system_rhs;
+    Vector<double> global_rotation;
+    Vector<double> global_x_translation;
+    Vector<double> global_y_translation;
   };
 
 
@@ -127,8 +132,10 @@ namespace Step8
     dof_handler.distribute_dofs(fe);
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
+    global_rotation.reinit(dof_handler.n_dofs());
+    global_x_translation.reinit(dof_handler.n_dofs());
+    global_y_translation.reinit(dof_handler.n_dofs());
 
-    // constraints.print(std::cout);
     constraints.clear();
     DoFTools::make_hanging_node_constraints(dof_handler, constraints);
 
@@ -139,87 +146,16 @@ namespace Step8
     //                                          constraints);
 
     QGauss<dim> quadrature_formula(fe.degree + 1);
-
     FEValues<dim> fe_values(fe,
-                            quadrature_formula,
-                            update_values | update_gradients |
-                              update_quadrature_points | update_JxW_values);
-
-
-
-    // ==================
-    // Define Null Space.
-    // ==================
-
-    const Point<2, double> location_2d_x(1.0, -1.0);
-    const Point<2, double> location_2d_origin(-1.0, -1.0);
-
-    ComponentMask x_direction(2, false);
-    x_direction.set(0, true);
-    ComponentMask y_direction(2, false);
-    y_direction.set(1, true);
-    MappingQ<2> mapping(2);
-
-    const auto &fe = dof_handler.get_fe();
-    const std::vector<Point<dim - 1>> &unit_support_points = fe.get_unit_face_support_points();
-    const Quadrature<dim - 1> quadrature(unit_support_points);
-    const unsigned int dofs_per_face = fe.dofs_per_face;
-    std::vector<types::global_dof_index> face_dofs(dofs_per_face);
-
-    FEFaceValues<2, 2> fe_face_values(mapping,
-                                      fe,
-                                      quadrature,
-                                      update_quadrature_points);
-
-    for (const auto &cell : dof_handler.active_cell_iterators())  
-        if (cell->at_boundary()
-            &&
-            (cell->is_locally_owned() || cell->is_ghost()))
-          for (unsigned int face_no = 0;
-               face_no < GeometryInfo<dim>::faces_per_cell; ++face_no)
-            if (cell->at_boundary(face_no))
-              {
-                const typename DoFHandler<2, 2>::face_iterator face = cell->face(face_no);
-                face->get_dof_indices(face_dofs);
-                fe_face_values.reinit(cell, face_no);
-
-                // bool found = false;
-                for (unsigned int i = 0; i < face_dofs.size(); ++i)
-                  {
-                    const unsigned int component = fe.face_system_to_component_index(i).first;
-                    if (x_direction[component])
-                      {
-                        const Point<dim> position = fe_face_values.quadrature_point(i);
-                        if (position.distance(location_2d_origin) < 1e-6*cell->diameter()){
-                            // found = true;
-                            if (!constraints.is_constrained(face_dofs[i]) &&
-                                constraints.can_store_line(face_dofs[i]) && constraints.n_constraints() < 3)
-                              constraints.add_line(face_dofs[i]);
-                          }
-                      } else if (y_direction[component]){
-                        const Point<dim> position = fe_face_values.quadrature_point(i);
-                        if (position.distance(location_2d_x) < 1e-6*cell->diameter())
-                          {
-                            if (!constraints.is_constrained(face_dofs[i]) &&
-                                constraints.can_store_line(face_dofs[i]) && constraints.n_constraints() < 3)
-                              constraints.add_line(face_dofs[i]);
-                          } else if (position.distance(location_2d_origin) < 1e-6*cell->diameter())
-                          {
-                            // found = true;
-                            if (!constraints.is_constrained(face_dofs[i]) &&
-                                constraints.can_store_line(face_dofs[i]) && constraints.n_constraints() < 3)
-                              constraints.add_line(face_dofs[i]);
-                          }
-                      }
-                      
-                  }
-              }
-
-    // ==================
-    // End of null space. 
-    // ==================
+                        quadrature_formula,
+                        update_values | update_gradients |
+                          update_quadrature_points | update_JxW_values);
 
     constraints.close();
+
+    setup_nullspace();
+    interpoalte_translation_and_rotation();
+
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
     DoFTools::make_sparsity_pattern(dof_handler,
@@ -227,6 +163,7 @@ namespace Step8
                                     constraints,
                                     /*keep_constrained_dofs = */ false);
 
+    fixing_corner_constriant.condense(dsp);
     constraints.condense(dsp);
     sparsity_pattern.copy_from(dsp);
 
@@ -370,8 +307,186 @@ namespace Step8
   void ElasticProblem<dim>::setup_nullspace()
   {
 
+
+    fixing_corner_constriant.clear();
+    // ==================
+    // Define Null Space.
+    // ==================
+
+    const Point<2, double> location_2d_x(1.0, -1.0);
+    const Point<2, double> location_2d_origin(-1.0, -1.0);
+
+    ComponentMask x_direction(2, false);
+    x_direction.set(0, true);
+    ComponentMask y_direction(2, false);
+    y_direction.set(1, true);
+    MappingQ<2> mapping(2);
+
+    const auto &fe = dof_handler.get_fe();
+    const std::vector<Point<dim - 1>> &unit_support_points = fe.get_unit_face_support_points();
+    const Quadrature<dim - 1> quadrature(unit_support_points);
+    const unsigned int dofs_per_face = fe.dofs_per_face;
+    std::vector<types::global_dof_index> face_dofs(dofs_per_face);
+
+    FEFaceValues<2, 2> fe_face_values(mapping,
+                                      fe,
+                                      quadrature,
+                                      update_quadrature_points);
+
+    for (const auto &cell : dof_handler.active_cell_iterators())  
+        if (cell->at_boundary()
+            &&
+            (cell->is_locally_owned() || cell->is_ghost()))
+          for (unsigned int face_no = 0;
+               face_no < GeometryInfo<dim>::faces_per_cell; ++face_no)
+            if (cell->at_boundary(face_no))
+              {
+                const typename DoFHandler<2, 2>::face_iterator face = cell->face(face_no);
+                face->get_dof_indices(face_dofs);
+                fe_face_values.reinit(cell, face_no);
+
+                // bool found = false;
+                for (unsigned int i = 0; i < face_dofs.size(); ++i)
+                  {
+                    const unsigned int component = fe.face_system_to_component_index(i).first;
+                    if (x_direction[component])
+                      {
+                        const Point<dim> position = fe_face_values.quadrature_point(i);
+                        if (position.distance(location_2d_origin) < 1e-6*cell->diameter()){
+                            // found = true;
+                            if (!fixing_corner_constriant.is_constrained(face_dofs[i]) &&
+                                fixing_corner_constriant.can_store_line(face_dofs[i]) && fixing_corner_constriant.n_constraints() < 3)
+                              fixing_corner_constriant.add_line(face_dofs[i]);
+                          }
+                      } else if (y_direction[component]){
+                        const Point<dim> position = fe_face_values.quadrature_point(i);
+                        if (position.distance(location_2d_x) < 1e-6*cell->diameter())
+                          {
+                            if (!fixing_corner_constriant.is_constrained(face_dofs[i]) &&
+                                fixing_corner_constriant.can_store_line(face_dofs[i]) && fixing_corner_constriant.n_constraints() < 3)
+                              fixing_corner_constriant.add_line(face_dofs[i]);
+                          } else if (position.distance(location_2d_origin) < 1e-6*cell->diameter())
+                          {
+                            // found = true;
+                            if (!fixing_corner_constriant.is_constrained(face_dofs[i]) &&
+                                fixing_corner_constriant.can_store_line(face_dofs[i]) && fixing_corner_constriant.n_constraints() < 3)
+                              fixing_corner_constriant.add_line(face_dofs[i]);
+                          }
+                      }
+                      
+                  }
+              }
+
+    // ==================
+    // End of null space. 
+    // ==================
+
+    fixing_corner_constriant.close();
    
   }
+
+  template <int dim>
+  void ElasticProblem<dim>::interpoalte_translation_and_rotation()
+  {
+    QGauss<dim> quadrature_formula(fe.degree + 1);
+    interpolating_constraint.clear();
+    FEValues<dim> fe_values(fe,
+                            quadrature_formula,
+                            update_values | update_gradients |
+                              update_quadrature_points | update_JxW_values);
+
+    const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
+
+    if (dim == 2){
+
+      // 2-d Case.
+      // Interpolate and Evaluate Curl null space.
+      Vector<double> local_rotation(dofs_per_cell);
+      
+
+      std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+      global_rotation.reinit(dof_handler.n_dofs());
+
+        for (auto &cell : dof_handler.active_cell_iterators()){
+
+          fe_values.reinit(cell);
+          local_rotation = 0;
+
+           for (const unsigned int i : fe_values.dof_indices())
+          {
+            const unsigned int component_i =
+              fe.system_to_component_index(i).first;
+
+            for (const unsigned int j : fe_values.dof_indices())
+              {
+                const unsigned int component_j =
+                  fe.system_to_component_index(j).first;
+
+                for (const unsigned int q_point :
+                     fe_values.quadrature_point_indices())
+                  {
+                    local_rotation(i) +=
+                     
+                      ( 
+                        ((component_i != component_j) ?        
+                           (fe_values.shape_grad(i, q_point)[component_j] -
+                            fe_values.shape_grad(j, q_point)[component_i] ) :             
+                           0)                                 
+                        ) *  fe_values.JxW(q_point);                 
+                  }
+              }
+          }
+            
+
+          cell->get_dof_indices(local_dof_indices);
+          interpolating_constraint.distribute_local_to_global(local_rotation, local_dof_indices, global_rotation);
+        }
+
+        global_rotation /= global_rotation.l2_norm();
+
+      // Interpolate translational null space.
+      // \int_\Omega (\Phi_i U_i)_1 = 0
+
+      Vector<double> local_x_translation(dofs_per_cell);
+      Vector<double> local_y_translation(dofs_per_cell);
+
+      global_x_translation.reinit(dof_handler.n_dofs());
+      global_y_translation.reinit(dof_handler.n_dofs());
+
+      for (auto &cell : dof_handler.active_cell_iterators()){
+          
+          fe_values.reinit(cell);
+          local_x_translation = 0;
+          local_y_translation = 0;
+
+          // Loop over component
+          for (const unsigned int i : fe_values.dof_indices()){
+            const unsigned int component_i =
+              fe.system_to_component_index(i).first;
+            
+            for (const unsigned int q_point : fe_values.quadrature_point_indices()){
+
+              if (component_i == 0)
+                  local_x_translation(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
+                
+              if (component_i == 1)
+                  local_y_translation(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
+
+            }
+            
+          }
+          cell->get_dof_indices(local_dof_indices);
+          interpolating_constraint.distribute_local_to_global(local_x_translation,local_dof_indices, global_x_translation);
+          interpolating_constraint.distribute_local_to_global(local_y_translation,local_dof_indices, global_y_translation);
+          
+        }
+
+        global_x_translation /= global_x_translation.l2_norm();   
+        global_y_translation /= global_y_translation.l2_norm();
+      }
+
+      interpolating_constraint.close();
+    }
 
 
   template <int dim>
@@ -386,6 +501,24 @@ namespace Step8
     cg.solve(system_matrix, solution, system_rhs, preconditioner);
 
     constraints.distribute(solution);
+    // fixing_corner_constriant.distribute(solution);
+
+    // Orthogonalize
+    // double tmp_x = global_rotation * global_x_translation;
+    // global_x_translation.add(-1 * tmp_x, global_rotation);
+
+    // double tmp_ry = global_rotation * global_y_translation;
+    // double tmp_xy = global_x_translation * global_y_translation;
+    // global_y_translation.add(-1 * tmp_ry, global_rotation);
+    // global_y_translation.add(-1 * tmp_xy, global_x_translation);
+
+    // double r_rotation=solution*global_rotation;
+    // solution.add(-1.0*r_rotation, global_rotation);
+    // double r_x=solution*global_x_translation;
+    // solution.add(-1.0*r_x, global_x_translation);
+    // double r_y=solution*global_y_translation;
+    // solution.add(-1.0*r_y, global_y_translation);
+
   }
 
 

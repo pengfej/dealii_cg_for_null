@@ -19,6 +19,8 @@
 
 
 // @sect3{Include files}
+#include <cmath>
+#include <deal.II/base/numbers.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/function.h>
 #include <deal.II/base/tensor.h>
@@ -63,6 +65,7 @@ namespace Step8
     void refine_grid();
     void output_results(const unsigned int cycle) const;
     void setup_nullspace();
+    void fixing_points();
 
     Triangulation<dim> triangulation;
     DoFHandler<dim>    dof_handler;
@@ -70,10 +73,13 @@ namespace Step8
     FESystem<dim> fe;
 
     AffineConstraints<double> constraints; // constructing matrix.
-    AffineConstraints<double> condensing_constraint;  // translation and rotation.
+    AffineConstraints<double> fixing_point_constraint; // fixing points
+    AffineConstraints<double> construct_nullspace_constraint; // constructing null space;
 
     SparsityPattern      sparsity_pattern;
     SparseMatrix<double> system_matrix;
+
+
 
     Vector<double> solution;
     Vector<double> system_rhs;
@@ -90,28 +96,43 @@ namespace Step8
     AssertDimension(values.size(), points.size());
     Assert(dim >= 2, ExcNotImplemented());
 
-    const double scale = 0.0;
-   
-    Point<dim> point_1, point_2;
-    point_1(0) = 0.0;
-    point_2(0) = -0.0;
+    const double pi = numbers::PI;
+    const double lambda_scalar = 1.0;
 
-    for (unsigned int point_n = 0; point_n < points.size(); ++point_n)
-      {
-        if (((points[point_n] - point_1).norm_square() < 0.2 * 0.2) ||
-            ((points[point_n] - point_2).norm_square() < 0.2 * 0.2))
-          values[point_n][0] = scale*1.0;
-        else
-          values[point_n][0] = 0.0;
+    for (unsigned int pt = 0; pt < points.size(); ++pt){
+      values[pt][0] += -pi*pi*std::sin(pi*points[pt][0]) * 
+                        std::sin(pi * points[pt][1])     +
+                        2*pi*pi*(1/lambda_scalar + 1)    * 
+                        std::cos(pi*points[pt][0])       * 
+                        std::sin(pi*points[pt][1]);
 
-        if (points[point_n].norm_square() < 0.2 * 0.2)
-          values[point_n][1] = scale*1.0;
-        else
-          values[point_n][1] = 0.0;
-      
-
-      }
+      values[pt][1] += -pi*pi*std::cos(pi*points[pt][0]) *
+                        std::cos(pi * points[pt][1])     +
+                        2*pi*pi*(1/lambda_scalar + 1)    *
+                        std::sin(pi*points[pt][0])       *
+                        std::cos(pi*points[pt][1]);
+    }
   }
+
+  template <int dim>
+  void exact_solution(const std::vector<Point<dim>> &points,
+                       std::vector<Tensor<1, dim>> &  values){
+    
+    AssertDimension(values.size(), points.size());
+    Assert(dim >= 2, ExcNotImplemented());
+
+    const double pi = numbers::PI;
+    const double lambda_scalar = 1.0;
+
+    for (unsigned int pt = 0; pt < points.size(); ++pt){
+      values[pt][0] += (-1 * std::sin(pi * points[pt][0]) + 1/lambda_scalar * std::cos(pi*points[pt][0])) *
+                        std::sin(pi*points[pt][1]) + 4/(pi * pi);
+
+      values[pt][1] += (-1 * std::cos(pi * points[pt][0]) + 1/lambda_scalar * std::sin(pi*points[pt][0])) *
+                        std::cos(pi*points[pt][1]);
+    }
+  }
+  
 
   template <int dim>
   ElasticProblem<dim>::ElasticProblem()
@@ -127,11 +148,20 @@ namespace Step8
     system_rhs.reinit(dof_handler.n_dofs());
 
     constraints.clear();
+    fixing_point_constraint.clear();
     DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+    constraints.close();
 
-    // setup_nullspace();
+    DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
+    DoFTools::make_sparsity_pattern(dof_handler,
+                                    dsp,
+                                    constraints,
+                                    /*keep_constrained_dofs = */ false);
 
-    // condensing_constraint.clear();
+    constraints.condense(dsp);
+
+
+    setup_nullspace();
 
     if (true){
 
@@ -139,9 +169,8 @@ namespace Step8
     // Define Null Space.
     // ==================
 
-    const Point<2, double> location_2d_x(1.0, -1.0);
-    const Point<2, double> location_2d_origin(-1.0, -1.0);
-
+    const Point<2, double> location_2d_x(0.0 , 1.0);
+    const Point<2, double> location_2d_origin(1.0, 1.0);
     ComponentMask x_direction(2, false);
     x_direction.set(0, true);
     ComponentMask y_direction(2, false);
@@ -160,9 +189,7 @@ namespace Step8
                                       update_quadrature_points);
 
     for (const auto &cell : dof_handler.active_cell_iterators())  
-        if (cell->at_boundary()
-            &&
-            (cell->is_locally_owned() || cell->is_ghost()))
+        if (cell->at_boundary())
           for (unsigned int face_no = 0;
                face_no < GeometryInfo<dim>::faces_per_cell; ++face_no)
             if (cell->at_boundary(face_no))
@@ -180,23 +207,26 @@ namespace Step8
                         const Point<dim> position = fe_face_values.quadrature_point(i);
                         if (position.distance(location_2d_origin) < 1e-6*cell->diameter()){
                             // found = true;
-                            if (!constraints.is_constrained(face_dofs[i]) &&
-                                constraints.can_store_line(face_dofs[i]) && constraints.n_constraints() < 3)
-                              constraints.add_line(face_dofs[i]);
+                            if (!fixing_point_constraint.is_constrained(face_dofs[i]) &&
+                                fixing_point_constraint.can_store_line(face_dofs[i]) && 
+                                fixing_point_constraint.n_constraints() < 3)
+                              fixing_point_constraint.add_line(face_dofs[i]);
                           }
                       } else if (y_direction[component]){
                         const Point<dim> position = fe_face_values.quadrature_point(i);
                         if (position.distance(location_2d_x) < 1e-6*cell->diameter())
                           {
-                            if (!constraints.is_constrained(face_dofs[i]) &&
-                                constraints.can_store_line(face_dofs[i]) && constraints.n_constraints() < 3)
-                              constraints.add_line(face_dofs[i]);
+                            if (!fixing_point_constraint.is_constrained(face_dofs[i]) &&
+                                fixing_point_constraint.can_store_line(face_dofs[i]) && 
+                                fixing_point_constraint.n_constraints() < 3)
+                              fixing_point_constraint.add_line(face_dofs[i]);
                           } else if (position.distance(location_2d_origin) < 1e-6*cell->diameter())
                           {
                             // found = true;
-                            if (!constraints.is_constrained(face_dofs[i]) &&
-                                constraints.can_store_line(face_dofs[i]) && constraints.n_constraints() < 3)
-                              constraints.add_line(face_dofs[i]);
+                            if (!fixing_point_constraint.is_constrained(face_dofs[i]) &&
+                                fixing_point_constraint.can_store_line(face_dofs[i]) && 
+                                fixing_point_constraint.n_constraints() < 3)
+                              fixing_point_constraint.add_line(face_dofs[i]);
                           }
                       }
                       
@@ -209,41 +239,13 @@ namespace Step8
 
     }
 
-    constraints.close();
+    //Constraint is empty.
+    fixing_point_constraint.close();
+    // printf("fixing point constraint: \n");
+    // fixing_point_constraint.print(std::cout);
+    // printf("\n");
 
-    if (false){
-      // Condensing constraint onto linear system.
-      const IndexSet all_dofs = DoFTools::extract_dofs(dof_handler, ComponentMask());
-      const types::global_dof_index first_dof = all_dofs.nth_index_in_set(0);
-      const types::global_dof_index second_dof = all_dofs.nth_index_in_set(1);
-      const types::global_dof_index third_dof = all_dofs.nth_index_in_set(2);
-
-
-      // condensing_constraint.clear();
-      condensing_constraint.add_line(first_dof);  
-      condensing_constraint.add_line(second_dof);  
-      condensing_constraint.add_line(third_dof);  
-      for (types::global_dof_index i : all_dofs ){
-        if ( (i != first_dof) & (i!= second_dof) & (i != third_dof) ){
-          condensing_constraint.add_entry(first_dof, i, -1.0 * global_rotation[i]);     
-          condensing_constraint.add_entry(second_dof, i, -1.0 * global_x_translation[i]);
-          condensing_constraint.add_entry(third_dof, i, -1.0 * global_y_translation[i]);
-        }
-      }
-        
-      condensing_constraint.close();
-      // condensing_constraint.print(std::cout);
-    }
-
-
-    DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
-    DoFTools::make_sparsity_pattern(dof_handler,
-                                    dsp,
-                                    constraints,
-                                    /*keep_constrained_dofs = */ false);
-
-    // condensing_constraint.condense(dsp);
-    constraints.condense(dsp);
+    // fixing_point_constraint.condense(dsp);
 
     sparsity_pattern.copy_from(dsp);
     system_matrix.reinit(sparsity_pattern);
@@ -276,7 +278,7 @@ namespace Step8
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
     std::vector<double> lambda_values(n_q_points);
     std::vector<double> mu_values(n_q_points);
-    Functions::ConstantFunction<dim> lambda(1.), mu(1.);
+    Functions::ConstantFunction<dim> lambda(1.), mu(0.5);
 
     std::vector<Tensor<1, dim>> rhs_values(n_q_points);
 
@@ -328,6 +330,7 @@ namespace Step8
           }
 
        
+        // Right hand side values.
         for (const unsigned int i : fe_values.dof_indices())
           {
             const unsigned int component_i =
@@ -340,41 +343,41 @@ namespace Step8
                              fe_values.JxW(q_point);
           }
 
-     
+
+          const double lambda_scalar = 1.0;
+          const double pi = numbers::PI;
+
+        // boundary conditions.
         for (const auto &face : cell->face_iterators())
-          if ((face->at_boundary()) && (face->boundary_id() == 1)){
+          if ((face->at_boundary()) ){
             // Left boundary has id 1.
             fe_face_values.reinit(cell,face);
             for (unsigned int q_point = 0; q_point < n_face_q_points; ++q_point)
                 { 
                   for (unsigned int i = 0; i < dofs_per_cell; ++i)
-		    {
-		      const unsigned int component_i =
-			    fe.system_to_component_index(i).first;
-		      if (component_i == 0)
-                    cell_rhs(i) +=
-                      (fe_face_values.shape_value(i, q_point) * // phi_i(x_q)
-                       -1.0 *                                  // g(x_q)
-                       fe_face_values.JxW(q_point));            // dx
-		    }
+                    {
+
+                      double x1 = fe_face_values.quadrature_point(q_point)[0];
+                      double x2 = fe_face_values.quadrature_point(q_point)[1];
+                       
+                      const unsigned int component_i = fe.system_to_component_index(i).first;
+                      if (component_i == 0 && (face->boundary_id() == 1 || face->boundary_id() == 3))  {
+                          cell_rhs(i) +=
+                                  (fe_face_values.shape_value(i, q_point) * // phi_i(x_q)
+                                    (-1*pi/lambda_scalar * std::cos(pi*x1) ) *       // g1 and g3 are the same, y var is zero.
+                                    fe_face_values.JxW(q_point));           // dx
+                      } else if (face->boundary_id() == 2 || face->boundary_id() == 4){
+                        double g_func = (component_i == 0) ? (pi * std::sin(pi*x2)) : (-1*pi/lambda_scalar * std::cos(pi*x2)); 
+                        cell_rhs(i) +=
+                                  (fe_face_values.shape_value(i, q_point) * // phi_i(x_q)
+                                    g_func *    // g2x : g2y g2 and g4 are identical.
+                                    fe_face_values.JxW(q_point));           // dx
+
+                      }
+                        
+                    }
                 }
-          } else if ((face->at_boundary()) && (face->boundary_id() == 2)){
-            // Right boundary has id 2.
-            fe_face_values.reinit(cell,face);
-            for (unsigned int q_point = 0; q_point < n_face_q_points; ++q_point)
-                { 
-                  for (unsigned int i = 0; i < dofs_per_cell; ++i)
-		    {
-		      const unsigned int component_i =
-			    fe.system_to_component_index(i).first;
-		      if (component_i == 0)
-                    cell_rhs(i) +=
-                      (fe_face_values.shape_value(i, q_point) *  // phi_i(x_q)
-                       1.0 *                                 // g(x_q)
-                       fe_face_values.JxW(q_point));            // dx
-		    }
-                }
-          }
+          } 
 
      
         cell->get_dof_indices(local_dof_indices);
@@ -386,6 +389,7 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::setup_nullspace()
   { 
+    construct_nullspace_constraint.clear();
     QGauss<dim> quadrature_formula(fe.degree + 1);
     FEValues<dim> fe_values(fe,
                             quadrature_formula,
@@ -436,7 +440,7 @@ namespace Step8
             
 
           cell->get_dof_indices(local_dof_indices);
-          constraints.distribute_local_to_global(local_rotation, local_dof_indices, global_rotation);
+          construct_nullspace_constraint.distribute_local_to_global(local_rotation, local_dof_indices, global_rotation);
         }
 
         global_rotation /= global_rotation.l2_norm();
@@ -465,16 +469,18 @@ namespace Step8
 
               if (component_i == 0)
                   local_x_translation(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
+                  // local_x_translation(i) += 1.0;
                 
               if (component_i == 1)
                   local_y_translation(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
+                  // local_y_translation(i) += 1.0;
 
             }
             
           }
           cell->get_dof_indices(local_dof_indices);
-          constraints.distribute_local_to_global(local_x_translation,local_dof_indices, global_x_translation);
-          constraints.distribute_local_to_global(local_y_translation,local_dof_indices, global_y_translation);
+          construct_nullspace_constraint.distribute_local_to_global(local_x_translation,local_dof_indices, global_x_translation);
+          construct_nullspace_constraint.distribute_local_to_global(local_y_translation,local_dof_indices, global_y_translation);
           
         }
 
@@ -484,11 +490,40 @@ namespace Step8
    }
    
   template <class VectorType>
-  struct Nullspace
+  class Nullspace
   {
+    public: 
     std::vector<VectorType> basis;
+    
+    void orthogonalize();
+    VectorType project_rhs(VectorType& rhs);
+
   };
+
+  template <class VectorType>
+  void Nullspace<VectorType>::orthogonalize(){
+    
+    for (unsigned int n = 0; n < basis.size(); ++n)
+      for (unsigned k = 0; k < n; ++k){
+        double tmp_jk = basis[n]*basis[k];
+        basis[k]  = basis[k] - tmp_jk * basis[n];
+      }
+    
+  }
    
+
+  template<class VectorType>
+  VectorType Nullspace<VectorType>::project_rhs(VectorType& rhs){
+
+    for (unsigned int n = 0; n < basis.size(); ++n){
+      double tmp_rhs_inner_product = rhs * basis[n];
+      rhs.add(-1*tmp_rhs_inner_product, rhs);
+    }
+
+    return rhs;
+
+  }
+
   template <typename Range, typename Domain, typename Payload, class VectorType>
   LinearOperator<Range, Domain, Payload>
   my_operator(const LinearOperator<Range, Domain, Payload> &op,
@@ -541,50 +576,38 @@ namespace Step8
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    if (false){
-      // std::cout << " condense system ! \n";
-      condensing_constraint.condense(system_matrix);
-      // std::cout << " condensing rhs ! \n";
-      condensing_constraint.condense(system_rhs);
-      // std::cout << "all good! \n";
-
-      cg.solve(system_matrix, solution, system_rhs, preconditioner);
-      condensing_constraint.distribute(solution);
-    }
-
-
     // Operator implementation.
     if (true){
          // Defining Nullspace.
         Nullspace<Vector<double>> nullspace;
-
         nullspace.basis.push_back(global_rotation);
         nullspace.basis.push_back(global_x_translation);
         nullspace.basis.push_back(global_y_translation);
+        nullspace.orthogonalize();
+        system_rhs = nullspace.project_rhs(system_rhs);
+        printf("so far so good!");
         
-        
+        // printf("printing system matrix");
+        // system_matrix.print(std::cout);
+        // printf("Now print right hand side: \n");
+        // system_rhs.print(std::cout);
+        // printf("Global rotation \n");
+        // global_rotation.print(std::cout);
+        // printf("Global x \n");
+        // global_x_translation.print(std::cout);
+        // printf("Global y \n");
+        // global_y_translation.print(std::cout);
+
         // original matrix, but projector after preconditioner
-        // auto matrix_op = linear_operator(system_matrix);
-        // auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
+        auto matrix_op = linear_operator(system_matrix);
+        auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
         // // remove nullspace from RHS
-        // double r_rotation=system_rhs*global_rotation;
-        // system_rhs.add(-1.0*r_rotation, global_rotation);
-        // double r_x=system_rhs*global_x_translation;
-        // system_rhs.add(-1.0*r_x, global_x_translation);
-        // double r_y=system_rhs*global_y_translation;
-        // system_rhs.add(-1.0*r_y, global_y_translation);
-        // // system_rhs.print(std::cout);
 
-        // cg.solve(matrix_op, solution, system_rhs, prec_op);
-        cg.solve(system_matrix, solution, system_rhs, preconditioner);
+        cg.solve(matrix_op, solution, system_rhs, prec_op);
+        // cg.solve(system_matrix, solution, system_rhs, preconditioner);
         constraints.distribute(solution);
-        double r_rotation=solution*global_rotation;
-        solution.add(-1.0*r_rotation, global_rotation);
-        double r_x=solution*global_x_translation;
-        solution.add(-1.0*r_x, global_x_translation);
-        double r_y=solution*global_y_translation;
-        solution.add(-1.0*r_y, global_y_translation);
+        fixing_point_constraint.distribute(solution);
 
     }
 
@@ -595,6 +618,11 @@ namespace Step8
   void ElasticProblem<dim>::refine_grid()
   {
     Vector<float> estimated_error_per_cell(triangulation.n_active_cells());
+
+    //============================
+    // TODO: Error estimate 
+    // based on exact solution?
+    // ===========================
 
     KellyErrorEstimator<dim>::estimate(dof_handler,
                                        QGauss<dim - 1>(fe.degree + 1),
@@ -616,15 +644,15 @@ namespace Step8
     DataOut<dim> data_out;
     data_out.attach_dof_handler(dof_handler);
  
-  std::vector<std::string> solution_names(dim, "displacement");
-  std::vector<DataComponentInterpretation::DataComponentInterpretation>
+    std::vector<std::string> solution_names(dim, "displacement");
+    std::vector<DataComponentInterpretation::DataComponentInterpretation>
     interpretation(dim,
                    DataComponentInterpretation::component_is_part_of_vector);
   
-  data_out.add_data_vector(dof_handler,
-                           solution,
-                           solution_names,
-                           interpretation);
+    data_out.add_data_vector(dof_handler,
+                            solution,
+                            solution_names,
+                            interpretation);
     data_out.build_patches();
 
     std::ofstream output("solution-" + std::to_string(cycle) + ".vtk");
@@ -641,22 +669,30 @@ namespace Step8
 
         if (cycle == 0)
           {
-            GridGenerator::hyper_cube(triangulation, -1, 1);
+            GridGenerator::hyper_cube(triangulation, 0, 1, true);
+            // Colorize will setup atuo.
             triangulation.refine_global(4);
-            for (const auto &cell : triangulation.cell_iterators())
-              for (const auto &face : cell->face_iterators())
-                {
-                  if (face-> at_boundary()){
-                    const auto center = face->center();
-                    if ((std::fabs(center(0) - (-1.0)) < 1e-16) ){
-                      // Left boundary.
-                      face->set_boundary_id(1);
-                    } else if ((std::fabs(center(0) - (1.0)) < 1e-16 )){
-                      // Right boundary.
-                      face->set_boundary_id(2); 
-                    }
-                  }
-                }
+            // for (const auto &cell : triangulation.cell_iterators())
+            //   for (const auto &face : cell->face_iterators())
+            //     {
+            //       // setup boundary id.
+            //       if (face-> at_boundary()){
+            //         const auto center = face->center();
+            //         if ((std::fabs(center(0) - (0.0)) < 1e-16) ){
+            //           // Left boundary.
+            //           face->set_boundary_id(1);
+            //         } else if ((std::fabs(center(0) - (1.0)) < 1e-16 )){
+            //           // Right boundary.
+            //           face->set_boundary_id(3); 
+            //         }else if ((std::fabs(center(1) - (1.0)) < 1e-16 )){
+            //           // top boundary.
+            //           face->set_boundary_id(2); 
+            //         }else if ((std::fabs(center(1) - (0.0)) < 1e-16 )){
+            //           // bottom boundary.
+            //           face->set_boundary_id(4); 
+            //         }
+            //       }
+            //     }
 
           }
         else
@@ -666,7 +702,6 @@ namespace Step8
                   << triangulation.n_active_cells() << std::endl;
 
         setup_system();
-        setup_nullspace();
 
         std::cout << "   Number of degrees of freedom: " << dof_handler.n_dofs()
                   << std::endl;
