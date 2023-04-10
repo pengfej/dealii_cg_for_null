@@ -44,6 +44,7 @@
 #include <deal.II/fe/fe_system.h>
 #include <deal.II/fe/fe_q.h>
 #include <deal.II/lac/linear_operator_tools.h>
+#include <deal.II/fe/component_mask.h>
 #include <fstream>
 #include <iostream>
 
@@ -66,6 +67,7 @@ namespace Step8
     void output_results(const unsigned int cycle) const;
     void setup_nullspace();
     void fixing_points();
+    void fixing_three_points();
 
     Triangulation<dim> triangulation;
     DoFHandler<dim>    dof_handler;
@@ -89,6 +91,43 @@ namespace Step8
   };
 
 
+  // template <int dim>
+  // class RightHandSide : public Function<dim>
+  // {
+  // public:
+  //   RightHandSide()
+  //     : Function<dim>(dim)
+  //   {}
+
+  //   virtual void vector_value(const Point<dim> &p,
+  //                             Vector<double> &  value) const override;
+  // };
+
+
+  // template <int dim>
+  // void RightHandSide<dim>::vector_value(const Point<dim> &p,
+  //                                       Vector<double> &  values) const
+  // {
+  //   const double ux = p[0];
+  //   const double uy = p[1];
+
+  //   constexpr double pi  = numbers::PI;
+  //   constexpr double pi2 = numbers::PI * numbers::PI;
+  //   const double lambda_scalar = 1.0;
+
+  //   values[0] = -pi*pi*std::sin(pi*ux) * 
+  //                       std::sin(pi * uy)     +
+  //                       2*pi*pi*(1/lambda_scalar + 1)    * 
+  //                       std::cos(pi*ux)       * 
+  //                       std::sin(pi*uy);
+  //   values[1] = -pi*pi*std::cos(pi*ux) *
+  //                       std::cos(pi * uy)     +
+  //                       2*pi*pi*(1/lambda_scalar + 1)    *
+  //                       std::sin(pi*ux)       *
+  //                       std::cos(pi*uy);
+  // }
+
+
   template <int dim>
   void right_hand_side(const std::vector<Point<dim>> &points,
                        std::vector<Tensor<1, dim>> &  values)
@@ -97,16 +136,16 @@ namespace Step8
     Assert(dim >= 2, ExcNotImplemented());
 
     const double pi = numbers::PI;
-    const double lambda_scalar = 1.0;
+    const double lambda_scalar = 2.0;
 
     for (unsigned int pt = 0; pt < points.size(); ++pt){
-      values[pt][0] += -pi*pi*std::sin(pi*points[pt][0]) * 
+      values[pt][0] += -1*pi*pi*std::sin(pi*points[pt][0]) * 
                         std::sin(pi * points[pt][1])     +
                         2*pi*pi*(1/lambda_scalar + 1)    * 
                         std::cos(pi*points[pt][0])       * 
                         std::sin(pi*points[pt][1]);
 
-      values[pt][1] += -pi*pi*std::cos(pi*points[pt][0]) *
+      values[pt][1] += -1* pi*pi*std::cos(pi*points[pt][0]) *
                         std::cos(pi * points[pt][1])     +
                         2*pi*pi*(1/lambda_scalar + 1)    *
                         std::sin(pi*points[pt][0])       *
@@ -114,25 +153,38 @@ namespace Step8
     }
   }
 
+
+
   template <int dim>
-  void exact_solution(const std::vector<Point<dim>> &points,
-                       std::vector<Tensor<1, dim>> &  values){
-    
-    AssertDimension(values.size(), points.size());
-    Assert(dim >= 2, ExcNotImplemented());
+  class ExactSolution : public Function<dim>
+  {
+  public:
+    ExactSolution()
+      : Function<dim>(dim)
+    {}
+
+    virtual void vector_value(const Point<dim> &p,
+                              Vector<double> &  values) const override;
+  };
+
+  template <int dim>
+  void ExactSolution<dim>::vector_value(const Point<dim> &p,
+                                        Vector<double> &  values) const
+  {
+    const double ux = p[0];
+    const double uy = p[1];
 
     const double pi = numbers::PI;
-    const double lambda_scalar = 1.0;
+    const double pi2 = numbers::PI * numbers::PI;
+    const double lambda_scalar = 2.0;
 
-    for (unsigned int pt = 0; pt < points.size(); ++pt){
-      values[pt][0] += (-1 * std::sin(pi * points[pt][0]) + 1/lambda_scalar * std::cos(pi*points[pt][0])) *
-                        std::sin(pi*points[pt][1]) + 4/(pi * pi);
+    values[0] = (-1 * std::sin(pi * ux) + 1/lambda_scalar * std::cos(pi*ux)) *
+                        std::sin(pi*uy) + 4/pi2;
 
-      values[pt][1] += (-1 * std::cos(pi * points[pt][0]) + 1/lambda_scalar * std::sin(pi*points[pt][0])) *
-                        std::cos(pi*points[pt][1]);
-    }
+    values[1] = (-1 * std::cos(pi * ux) + 1/lambda_scalar * std::sin(pi*ux)) *
+                    std::cos(pi*uy);
   }
-  
+
 
   template <int dim>
   ElasticProblem<dim>::ElasticProblem()
@@ -148,7 +200,6 @@ namespace Step8
     system_rhs.reinit(dof_handler.n_dofs());
 
     constraints.clear();
-    fixing_point_constraint.clear();
     DoFTools::make_hanging_node_constraints(dof_handler, constraints);
     constraints.close();
 
@@ -158,16 +209,18 @@ namespace Step8
                                     constraints,
                                     /*keep_constrained_dofs = */ false);
 
-    constraints.condense(dsp);
-
-
     setup_nullspace();
 
-    if (true){
+    sparsity_pattern.copy_from(dsp);
+    system_matrix.reinit(sparsity_pattern);
+  }
 
-    // ==================
-    // Define Null Space.
-    // ==================
+  template <int dim>
+  void ElasticProblem<dim>::fixing_three_points()
+  {
+
+
+    fixing_point_constraint.clear();
 
     const Point<2, double> location_2d_x(0.0 , 1.0);
     const Point<2, double> location_2d_origin(1.0, 1.0);
@@ -182,6 +235,7 @@ namespace Step8
     const Quadrature<dim - 1> quadrature(unit_support_points);
     const unsigned int dofs_per_face = fe.dofs_per_face;
     std::vector<types::global_dof_index> face_dofs(dofs_per_face);
+    const IndexSet all_dof = DoFTools::extract_dofs(dof_handler, ComponentMask());
 
     FEFaceValues<2, 2> fe_face_values(mapping,
                                       fe,
@@ -209,46 +263,50 @@ namespace Step8
                             // found = true;
                             if (!fixing_point_constraint.is_constrained(face_dofs[i]) &&
                                 fixing_point_constraint.can_store_line(face_dofs[i]) && 
-                                fixing_point_constraint.n_constraints() < 3)
-                              fixing_point_constraint.add_line(face_dofs[i]);
-                          }
+                                fixing_point_constraint.n_constraints() < 3){
+                                  fixing_point_constraint.add_line(face_dofs[i]);
+                                  // for (types::global_dof_index k : all_dof){
+                                  //   if (k != face_dofs[i])
+                                  //     fixing_point_constraint.add_entry(face_dofs[i], k, global_rotation[k]);
+                                  // }
+                                }
+                            }
                       } else if (y_direction[component]){
                         const Point<dim> position = fe_face_values.quadrature_point(i);
                         if (position.distance(location_2d_x) < 1e-6*cell->diameter())
                           {
                             if (!fixing_point_constraint.is_constrained(face_dofs[i]) &&
                                 fixing_point_constraint.can_store_line(face_dofs[i]) && 
-                                fixing_point_constraint.n_constraints() < 3)
-                              fixing_point_constraint.add_line(face_dofs[i]);
+                                fixing_point_constraint.n_constraints() < 3){
+                                  fixing_point_constraint.add_line(face_dofs[i]);
+                                  // for (types::global_dof_index k : all_dof){
+                                  //   if (k != face_dofs[i])
+                                  //     fixing_point_constraint.add_entry(face_dofs[i], k, global_x_translation[k]);
+                                  // }
+                                }
                           } else if (position.distance(location_2d_origin) < 1e-6*cell->diameter())
                           {
                             // found = true;
                             if (!fixing_point_constraint.is_constrained(face_dofs[i]) &&
                                 fixing_point_constraint.can_store_line(face_dofs[i]) && 
-                                fixing_point_constraint.n_constraints() < 3)
-                              fixing_point_constraint.add_line(face_dofs[i]);
+                                fixing_point_constraint.n_constraints() < 3){
+                                  fixing_point_constraint.add_line(face_dofs[i]);
+                                  // for (types::global_dof_index k : all_dof){
+                                  //   if (k != face_dofs[i])
+                                  //     fixing_point_constraint.add_entry(face_dofs[i], k, global_y_translation[k]);
+                                  // }
+                                }
                           }
                       }
                       
                   }
-              }
 
-    // ==================
-    // End of null space. 
-    // ==================
+      }
 
-    }
-
-    //Constraint is empty.
     fixing_point_constraint.close();
-    // printf("fixing point constraint: \n");
-    // fixing_point_constraint.print(std::cout);
-    // printf("\n");
-
-    // fixing_point_constraint.condense(dsp);
-
-    sparsity_pattern.copy_from(dsp);
-    system_matrix.reinit(sparsity_pattern);
+    printf("fixing point constraint: \n");
+    fixing_point_constraint.print(std::cout);
+    printf("\n");
   }
 
   template <int dim>
@@ -278,7 +336,7 @@ namespace Step8
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
     std::vector<double> lambda_values(n_q_points);
     std::vector<double> mu_values(n_q_points);
-    Functions::ConstantFunction<dim> lambda(1.), mu(0.5);
+    Functions::ConstantFunction<dim> lambda(2.), mu(0.5);
 
     std::vector<Tensor<1, dim>> rhs_values(n_q_points);
 
@@ -344,7 +402,7 @@ namespace Step8
           }
 
 
-          const double lambda_scalar = 1.0;
+          const double lambda_scalar = 2.0;
           const double pi = numbers::PI;
 
         // boundary conditions.
@@ -362,15 +420,16 @@ namespace Step8
                        
                       const unsigned int component_i = fe.system_to_component_index(i).first;
                       if (component_i == 0 && (face->boundary_id() == 1 || face->boundary_id() == 3))  {
-                          cell_rhs(i) +=
-                                  (fe_face_values.shape_value(i, q_point) * // phi_i(x_q)
-                                    (-1*pi/lambda_scalar * std::cos(pi*x1) ) *       // g1 and g3 are the same, y var is zero.
-                                    fe_face_values.JxW(q_point));           // dx
+                        double g_func =(-1*pi/lambda_scalar * std::cos(pi*x1) );
+                        cell_rhs(i) +=
+                                (fe_face_values.shape_value(i, q_point) * // phi_i(x_q)
+                                  g_func *                                // g1 and g3 are the same, y var is zero.
+                                  fe_face_values.JxW(q_point));           // dx
                       } else if (face->boundary_id() == 2 || face->boundary_id() == 4){
                         double g_func = (component_i == 0) ? (pi * std::sin(pi*x2)) : (-1*pi/lambda_scalar * std::cos(pi*x2)); 
                         cell_rhs(i) +=
                                   (fe_face_values.shape_value(i, q_point) * // phi_i(x_q)
-                                    g_func *    // g2x : g2y g2 and g4 are identical.
+                                    g_func *                                // g2x : g2y g2 and g4 are identical.
                                     fe_face_values.JxW(q_point));           // dx
 
                       }
@@ -487,6 +546,7 @@ namespace Step8
         global_x_translation /= global_x_translation.l2_norm();   
         global_y_translation /= global_y_translation.l2_norm();
     }
+
    }
    
   template <class VectorType>
@@ -496,7 +556,7 @@ namespace Step8
     std::vector<VectorType> basis;
     
     void orthogonalize();
-    VectorType project_rhs(VectorType& rhs);
+    VectorType remove_nullspace(VectorType& rhs);
 
   };
 
@@ -513,7 +573,7 @@ namespace Step8
    
 
   template<class VectorType>
-  VectorType Nullspace<VectorType>::project_rhs(VectorType& rhs){
+  VectorType Nullspace<VectorType>::remove_nullspace(VectorType& rhs){
 
     for (unsigned int n = 0; n < basis.size(); ++n){
       double tmp_rhs_inner_product = rhs * basis[n];
@@ -579,15 +639,21 @@ namespace Step8
     // Operator implementation.
     if (true){
          // Defining Nullspace.
-        Nullspace<Vector<double>> nullspace;
-        nullspace.basis.push_back(global_rotation);
-        nullspace.basis.push_back(global_x_translation);
-        nullspace.basis.push_back(global_y_translation);
-        nullspace.orthogonalize();
-        system_rhs = nullspace.project_rhs(system_rhs);
-        printf("so far so good!");
+        // Nullspace<Vector<double>> nullspace;
+        // nullspace.basis.push_back(global_rotation);
+        // nullspace.basis.push_back(global_x_translation);
+        // nullspace.basis.push_back(global_y_translation);
+        // nullspace.orthogonalize();
+        // fixing_point_constraint.condense(system_matrix);  
+        // fixing_point_constraint.condense(system_rhs);
+        // system_rhs = nullspace.project_rhs(system_rhs);
+        // auto matrix_op = linear_operator(system_matrix);
+        // auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
+        // cg.solve(matrix_op, solution, system_rhs, prec_op);
         
-        // printf("printing system matrix");
+        // printf("printing system matrix \n");
+        // FullMatrix<double> tmp;
+        // tmp.copy_from(system_matrix);
         // system_matrix.print(std::cout);
         // printf("Now print right hand side: \n");
         // system_rhs.print(std::cout);
@@ -598,16 +664,13 @@ namespace Step8
         // printf("Global y \n");
         // global_y_translation.print(std::cout);
 
-        // original matrix, but projector after preconditioner
-        auto matrix_op = linear_operator(system_matrix);
-        auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
-
-        // // remove nullspace from RHS
-
-        cg.solve(matrix_op, solution, system_rhs, prec_op);
-        // cg.solve(system_matrix, solution, system_rhs, preconditioner);
-        constraints.distribute(solution);
-        fixing_point_constraint.distribute(solution);
+        fixing_three_points();
+        fixing_point_constraint.condense(system_matrix);
+        fixing_point_constraint.condense(system_rhs);
+        cg.solve(system_matrix, solution, system_rhs, preconditioner);
+        // constraints.distribute(solution);
+        // fixing_point_constraint.distribute(solution);
+        // solution = nullspace.remove_nullspace(solution);
 
     }
 
@@ -617,21 +680,25 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::refine_grid()
   {
-    Vector<float> estimated_error_per_cell(triangulation.n_active_cells());
+    Vector<double> cellwise_errors(triangulation.n_active_cells());
+    QGauss<dim>    quadrature(fe.degree + 1);
 
-    //============================
-    // TODO: Error estimate 
-    // based on exact solution?
-    // ===========================
+    VectorTools::integrate_difference(dof_handler,
+                                      solution,
+                                      ExactSolution<dim>(),
+                                      cellwise_errors,
+                                      quadrature,
+                                      VectorTools::L2_norm);
 
-    KellyErrorEstimator<dim>::estimate(dof_handler,
-                                       QGauss<dim - 1>(fe.degree + 1),
-                                       {},
-                                       solution,
-                                       estimated_error_per_cell);
+    const double error_u =
+      VectorTools::compute_global_error(triangulation,
+                                        cellwise_errors,
+                                        VectorTools::L2_norm);
+
+    std::cout << "error: u_0: " << error_u << std::endl;
 
     GridRefinement::refine_and_coarsen_fixed_number(triangulation,
-                                                    estimated_error_per_cell,
+                                                    cellwise_errors,
                                                     0.3,
                                                     0.03);
 
@@ -648,11 +715,11 @@ namespace Step8
     std::vector<DataComponentInterpretation::DataComponentInterpretation>
     interpretation(dim,
                    DataComponentInterpretation::component_is_part_of_vector);
-  
+
     data_out.add_data_vector(dof_handler,
-                            solution,
-                            solution_names,
-                            interpretation);
+                              solution,
+                              solution_names,
+                              interpretation);
     data_out.build_patches();
 
     std::ofstream output("solution-" + std::to_string(cycle) + ".vtk");
@@ -669,30 +736,30 @@ namespace Step8
 
         if (cycle == 0)
           {
-            GridGenerator::hyper_cube(triangulation, 0, 1, true);
+            GridGenerator::hyper_cube(triangulation, 0, 1);
             // Colorize will setup atuo.
             triangulation.refine_global(4);
-            // for (const auto &cell : triangulation.cell_iterators())
-            //   for (const auto &face : cell->face_iterators())
-            //     {
-            //       // setup boundary id.
-            //       if (face-> at_boundary()){
-            //         const auto center = face->center();
-            //         if ((std::fabs(center(0) - (0.0)) < 1e-16) ){
-            //           // Left boundary.
-            //           face->set_boundary_id(1);
-            //         } else if ((std::fabs(center(0) - (1.0)) < 1e-16 )){
-            //           // Right boundary.
-            //           face->set_boundary_id(3); 
-            //         }else if ((std::fabs(center(1) - (1.0)) < 1e-16 )){
-            //           // top boundary.
-            //           face->set_boundary_id(2); 
-            //         }else if ((std::fabs(center(1) - (0.0)) < 1e-16 )){
-            //           // bottom boundary.
-            //           face->set_boundary_id(4); 
-            //         }
-            //       }
-            //     }
+            for (const auto &cell : triangulation.cell_iterators())
+              for (const auto &face : cell->face_iterators())
+                {
+                  // setup boundary id.
+                  if (face-> at_boundary()){
+                    const auto center = face->center();
+                    if ((std::fabs(center(0) - (0.0)) < 1e-16) ){
+                      // Left boundary.
+                      face->set_boundary_id(1);
+                    } else if ((std::fabs(center(0) - (1.0)) < 1e-16 )){
+                      // Right boundary.
+                      face->set_boundary_id(3); 
+                    }else if ((std::fabs(center(1) - (1.0)) < 1e-16 )){
+                      // top boundary.
+                      face->set_boundary_id(2); 
+                    }else if ((std::fabs(center(1) - (0.0)) < 1e-16 )){
+                      // bottom boundary.
+                      face->set_boundary_id(4); 
+                    }
+                  }
+                }
 
           }
         else
@@ -707,6 +774,7 @@ namespace Step8
                   << std::endl;
 
         assemble_system();
+        
         solve();
         output_results(cycle);
       }
