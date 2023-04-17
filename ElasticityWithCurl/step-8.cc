@@ -238,13 +238,13 @@ namespace Step8
   {
 
 
-    const Point<2, double> location_2d_x(0.0 , 1.0);
-    const Point<2, double> location_2d_origin(1.0, 1.0);
+    const Point<dim, double> location_2d_x(0.0 , 1.0);
+    const Point<dim, double> location_2d_origin(1.0, 1.0);
     ComponentMask x_direction(2, false);
     x_direction.set(0, true);
     ComponentMask y_direction(2, false);
     y_direction.set(1, true);
-    MappingQ<2> mapping(2);
+    MappingQ<dim> mapping(2);
 
     const auto &fe = dof_handler.get_fe();
     const std::vector<Point<dim - 1>> &unit_support_points = fe.get_unit_face_support_points();
@@ -253,7 +253,7 @@ namespace Step8
     std::vector<types::global_dof_index> face_dofs(dofs_per_face);
     const IndexSet all_dof = DoFTools::extract_dofs(dof_handler, ComponentMask());
 
-    FEFaceValues<2, 2> fe_face_values(mapping,
+    FEFaceValues<dim, dim> fe_face_values(mapping,
                                       fe,
                                       quadrature,
                                       update_quadrature_points);
@@ -264,7 +264,7 @@ namespace Step8
                face_no < GeometryInfo<dim>::faces_per_cell; ++face_no)
             if (cell->at_boundary(face_no))
               {
-                const typename DoFHandler<2, 2>::face_iterator face = cell->face(face_no);
+                const typename DoFHandler<dim, dim>::face_iterator face = cell->face(face_no);
                 face->get_dof_indices(face_dofs);
                 fe_face_values.reinit(cell, face_no);
 
@@ -803,7 +803,7 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 15; ++cycle)
+    for (unsigned int cycle = 0; cycle < 6; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
@@ -811,7 +811,7 @@ namespace Step8
           {
             GridGenerator::hyper_cube(triangulation, 0, 1);
             // Colorize will setup atuo.
-            triangulation.refine_global();
+            triangulation.refine_global(4);
             for (const auto &cell : triangulation.cell_iterators())
               for (const auto &face : cell->face_iterators())
                 {
