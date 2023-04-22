@@ -1,0 +1,127 @@
+Set of points 
+
+    // So far the best pair for lambda = 2; (1)
+    // const Point<dim, double> location_1(0.25,0.5);
+    // const Point<dim, double> location_2(1.00,0.5);
+
+    // For lambda = 10: (2)
+    // const Point<dim, double> location_1(0.25,0.25);
+    // const Point<dim, double> location_2(0.25,0.75);
+
+    // Not very ideal, used to compare: (3)
+    // const Point<dim, double> location_1(1.0,0.0);
+    // const Point<dim, double> location_2(0.0,1.0);
+
+    // definitely gonna be there. (4)
+    // const Point<dim, double> location_1(0.0,0.0);
+    // const Point<dim, double> location_2(1.0,1.0);
+
+    // Completely nonsense, should result in diverging (5)
+    // const Point<dim, double> location_1(0.125,0.875);
+    // const Point<dim, double> location_2(0.5, 0.0);
+
+
+using (1)
+Scanning dependencies of target step-8
+[ 33%] Building CXX object CMakeFiles/step-8.dir/step-8.cc.o
+[ 66%] Linking CXX executable step-8
+[ 66%] Built target step-8
+[100%] Run step-8 with Debug configuration
+Cycle 0:
+Cycle 1:
+error: u_0: 0.0364163
+Cycle 2:
+error: u_0: 0.0243777
+Cycle 3:
+error: u_0: 0.018865
+Cycle 4:
+error: u_0: 0.016433
+Cycle 5:
+error: u_0: 0.0139225
+Cycle 6:
+error: u_0: 0.0132956
+[100%] Built target run
+
+using (2)
+Scanning dependencies of target step-8
+[ 33%] Building CXX object CMakeFiles/step-8.dir/step-8.cc.o
+[ 66%] Linking CXX executable step-8
+[ 66%] Built target step-8
+[100%] Run step-8 with Debug configuration
+Cycle 0:
+Cycle 1:
+error: u_0: 0.160119
+Cycle 2:
+error: u_0: 0.152397
+Cycle 3:
+error: u_0: 0.149192
+Cycle 4:
+error: u_0: 0.151189
+Cycle 5:
+error: u_0: 0.14916
+Cycle 6:
+error: u_0: 0.150955
+[100%] Built target run
+
+using (3)
+Scanning dependencies of target step-8
+[ 33%] Building CXX object CMakeFiles/step-8.dir/step-8.cc.o
+[ 66%] Linking CXX executable step-8
+[ 66%] Built target step-8
+[100%] Run step-8 with Debug configuration
+Cycle 0:
+Cycle 1:
+error: u_0: 1.10973
+Cycle 2:
+error: u_0: 1.0756
+Cycle 3:
+error: u_0: 1.08765
+Cycle 4:
+error: u_0: 1.0857
+Cycle 5:
+error: u_0: 1.08222
+Cycle 6:
+error: u_0: 1.0825
+[100%] Built target run
+
+using (4)
+Scanning dependencies of target step-8
+[ 33%] Building CXX object CMakeFiles/step-8.dir/step-8.cc.o
+[ 66%] Linking CXX executable step-8
+[ 66%] Built target step-8
+[100%] Run step-8 with Debug configuration
+Cycle 0:
+Cycle 1:
+error: u_0: 1.10973
+Cycle 2:
+error: u_0: 1.0756
+Cycle 3:
+error: u_0: 1.08765
+Cycle 4:
+error: u_0: 1.0857
+Cycle 5:
+error: u_0: 1.08222
+Cycle 6:
+error: u_0: 1.0825
+[100%] Built target run
+
+using (5)
+Scanning dependencies of target step-8
+[ 33%] Building CXX object CMakeFiles/step-8.dir/step-8.cc.o
+[ 66%] Linking CXX executable step-8
+[ 66%] Built target step-8
+[100%] Run step-8 with Debug configuration
+Cycle 0:
+Cycle 1:
+error: u_0: 0.694151
+Cycle 2:
+error: u_0: 0.694904
+Cycle 3:
+error: u_0: 0.707446
+Cycle 4:
+error: u_0: 0.707338
+Cycle 5:
+error: u_0: 0.710177
+Cycle 6:
+error: u_0: 0.712426
+[100%] Built target run
