@@ -71,7 +71,7 @@ namespace Step8
     void solve();
     void refine_grid();
     void output_results(const unsigned int cycle) const;
-    // void petsc_nullspace();
+    void petsc_nullspace();
     void setup_nullspace();
     void fixing_three_points();
     void print_mean_value();
@@ -191,16 +191,10 @@ namespace Step8
   }
 
   template <int dim>
-  void rotation_point_capture(const std::vector<Point<dim>> &points,
-                              Vector<double> & values)
+  void rotation_point_capture(const Point<dim> &points,
+                              const Point<dim> &values)
   {
-    for (unsigned int p = 0; p < points.size(); ++p){
-      const double ux = points[p][0];
-      const double uy = points[p][1];
-
-      values[2*p] = -1.0 * uy;
-      values[2*p+1] =  1.0 * ux;
-    }
+      return Point<dim>(-1 * points[1], points[0]);
   }
 
 
@@ -223,7 +217,8 @@ namespace Step8
 
     // Fixing three points or using exact boundary condition.
     if (true)
-      fixing_three_points();
+      // fixing_three_points();
+      std::cout << " ";
     else
       VectorTools::interpolate_boundary_values(dof_handler,
                                            0,
@@ -239,8 +234,8 @@ namespace Step8
                                     constraints,
                                     /*keep_constrained_dofs = */ false);
 
-    setup_nullspace();
-    // petsc_nullspace();
+    // setup_nullspace();
+    petsc_nullspace();
     
 
     sparsity_pattern.copy_from(dsp);
@@ -252,8 +247,8 @@ namespace Step8
   {
 
     // So far the best pair for lambda = 2; (1)
-    // const Point<dim, double> location_1(0.25,0.5);
-    // const Point<dim, double> location_2(1.00,0.5);
+    const Point<dim, double> location_1(0.25,0.5);
+    const Point<dim, double> location_2(1.00,0.5);
 
     // For lambda = 10: (2)
     // const Point<dim, double> location_1(0.25,0.25);
@@ -267,13 +262,9 @@ namespace Step8
     // const Point<dim, double> location_1(0.0,0.0);
     // const Point<dim, double> location_2(1.0,1.0);
 
-    // Completely nonsense, should result in diverging (5)
-    // const Point<dim, double> location_1(0.125,0.875);
-    // const Point<dim, double> location_2(0.5, 0.0);
-
-    // tradition:
-    const Point<dim, double> location_1(1.0,1.0);
-    const Point<dim, double> location_2(0.0,1.0);
+    // tradition:(5)
+    // const Point<dim, double> location_1(0.0, 0.5);
+    // const Point<dim, double> location_2(1.0, 0.5);
     
     ComponentMask x_direction(2, false);
     x_direction.set(0, true);
@@ -398,7 +389,6 @@ namespace Step8
         mu.value_list(fe_values.get_quadrature_points(), mu_values);
         right_hand_side(fe_values.get_quadrature_points(), rhs_values);
 
-        // rotation_point_capture(fe_values.get_quadrature_points(), global_rotation);
 
         for (const unsigned int i : fe_values.dof_indices())
           {
@@ -493,29 +483,46 @@ namespace Step8
           cell_matrix, cell_rhs, local_dof_indices, system_matrix, system_rhs);
       }
   }
-  // template <int dim>
-  // void ElasticProblem<dim>::petsc_nullspace()
-  // {
+  template <int dim>
+  void ElasticProblem<dim>::petsc_nullspace()
+  {
 
-  //     QGauss<dim> quadrature_formula(fe.degree + 1);
-  //     FEValues<dim> fe_values(fe,
-  //                             quadrature_formula,
-  //                             update_values | update_gradients |
-  //                               update_quadrature_points | update_JxW_values);
+      QGauss<dim> quadrature_formula(fe.degree + 1);
+      FEValues<dim> fe_values(fe,
+                              quadrature_formula,
+                              update_values | update_gradients |
+                                update_quadrature_points | update_JxW_values);
 
 
-  //     global_rotation.reinit(dof_handler.n_dofs());
-  //     global_x_translation.reinit(dof_handler.n_dofs());
-  //     global_y_translation.reinit(dof_handler.n_dofs());
+      global_rotation.reinit(dof_handler.n_dofs());
+      global_x_translation.reinit(dof_handler.n_dofs());
+      global_y_translation.reinit(dof_handler.n_dofs());
 
-  //     for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
-  //       if (i % 2 == 0){
-  //         global_x_translation(i) += 1.0;
-  //       } else {
-  //         global_y_translation(i) += 1.0;
-  //       }
-  //     }
-  // }
+      Vector<double> local_rotation(fe_values.dofs_per_cell);
+
+      for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
+        printf("x_val is %f, y_val is %f \n", )
+        if (i % 2 == 0){
+          global_x_translation(i) += 1.0;
+        } else {
+          global_y_translation(i) += 1.0;
+        }
+      }
+
+      // ===================================================================================
+      // How to get the list of all quadrature point?
+      // What's the length of local_rotation, can I still use distribute local to global?
+      // ===================================================================================
+      
+      // for (const auto &cell : dof_handler.active_cell_iterators()){
+      //   fe_values.reinit(cell);
+      //   for (unsigned int q_point : fe_values.quadrature_point_indices()){
+      //       Point<dim, double> tmp_point;
+      //       rotation_point_capture(fe_values.quadrature_point(q_point), tmp_point);
+            
+      //   }
+      // }
+  }
 
 
   template <int dim>
@@ -749,18 +756,26 @@ namespace Step8
         // Modified Gram Schimidt
         nullspace.orthogonalize();
 
+        
+        printf("Global rotation \n");
+        global_rotation.print(std::cout);
+        printf("Global x \n");
+        global_x_translation.print(std::cout);
+        printf("Global y \n");
+        global_y_translation.print(std::cout);
+
         // // Solving with null space removal
-        // auto matrix_op = linear_operator(system_matrix);
-        // system_rhs = nullspace.remove_nullspace(system_rhs);
-        // auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
-        // cg.solve(matrix_op, solution, system_rhs, prec_op);
+        system_rhs = nullspace.remove_nullspace(system_rhs);
+        auto matrix_op = linear_operator(system_matrix);
+        auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
+        cg.solve(matrix_op, solution, system_rhs, prec_op);
 
         // Project out null space from right hand side.
         // constraints.condense(system_matrix);
         // constraints.condense(system_rhs);
 
         // Traditional Solve.
-        cg.solve(system_matrix, solution, system_rhs, preconditioner);
+        // cg.solve(system_matrix, solution, system_rhs, preconditioner);
 
         // Post processing.
         constraints.distribute(solution);
@@ -773,7 +788,7 @@ namespace Step8
         // tmp.copy_from(system_matrix);
         // system_matrix.print(std::cout);
         // printf("Now print right hand side: \n");
-        // // system_rhs.print(std::cout);
+        // system_rhs.print(std::cout);
         // printf("Global rotation \n");
         // global_rotation.print(std::cout);
         // printf("Global x \n");
@@ -863,7 +878,7 @@ namespace Step8
 
         if (cycle == 0)
           {
-            GridGenerator::hyper_cube(triangulation, 0, 1);
+            GridGenerator::hyper_cube(triangulation, -0.5, 0.5);
             // Colorize will setup atuo.
             triangulation.refine_global(3);
             if (true)
