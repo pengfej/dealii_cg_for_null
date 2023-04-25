@@ -58,6 +58,85 @@ namespace Step8
 
   const double lambda_scalar = 2.0;
 
+
+  template <class VectorType>
+  class Nullspace
+  {
+    public: 
+    std::vector<VectorType> basis;
+    
+    void orthogonalize();
+    VectorType remove_nullspace(VectorType& rhs);
+
+  };
+
+  template <class VectorType>
+  void Nullspace<VectorType>::orthogonalize(){
+
+    
+    for (unsigned int n = 0; n < basis.size(); ++n)
+      for (unsigned k = 0; k < n; ++k){
+        double tmp_jk = basis[n]*basis[k];
+        basis[k]  = basis[k] - tmp_jk * basis[n];
+      }
+    
+  }
+   
+
+  template<class VectorType>
+  VectorType Nullspace<VectorType>::remove_nullspace(VectorType& rhs){
+
+    for (unsigned int n = 0; n < basis.size(); ++n){
+      double tmp_rhs_inner_product = rhs * basis[n];
+      rhs.add(-1*tmp_rhs_inner_product, basis[n]);
+    }
+
+    return rhs;
+
+  }
+
+  template <typename Range, typename Domain, typename Payload, class VectorType>
+  LinearOperator<Range, Domain, Payload>
+  my_operator(const LinearOperator<Range, Domain, Payload> &op,
+				                         Nullspace<VectorType> &nullspace)
+  {
+      LinearOperator<Range, Domain, Payload> return_op;
+
+      return_op.reinit_range_vector  = op.reinit_range_vector;
+      return_op.reinit_domain_vector = op.reinit_domain_vector;
+
+      return_op.vmult = [&](Range &dest, const Domain &src) {
+          op.vmult(dest, src);   // dest = Phi(src)
+
+          // Projection.
+          for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
+            {
+              double inner_product = nullspace.basis[i]*dest;
+	            dest.add( -1.0*inner_product, nullspace.basis[i]);
+            }
+      };
+
+      return_op.vmult_add = [&](Range &dest, const Domain &src) {
+          std::cout << "before vmult_add" << std::endl;
+          op.vmult_add(dest, src);  // dest += Phi(src)
+          std::cout << "after vmult_add" << std::endl;
+      };
+
+      return_op.Tvmult = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult" << std::endl;
+          op.Tvmult(dest, src);
+          std::cout << "after Tvmult" << std::endl;
+      };
+
+      return_op.Tvmult_add = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult_add" << std::endl;
+          op.Tvmult_add(dest, src);
+          std::cout << "after Tvmult_add" << std::endl;
+      };
+
+      return return_op;
+  }
+
   template <int dim>
   class ElasticProblem
   {
@@ -93,6 +172,7 @@ namespace Step8
     Vector<double> global_rotation;
     Vector<double> global_x_translation;
     Vector<double> global_y_translation;
+    Nullspace<Vector<double>> nullspace;
   };
 
 
@@ -131,6 +211,8 @@ namespace Step8
   //                       std::sin(pi*ux)       *
   //                       std::cos(pi*uy);
   // }
+
+  
 
 
   template <int dim>
@@ -192,9 +274,10 @@ namespace Step8
 
   template <int dim>
   void rotation_point_capture(const Point<dim> &points,
-                              const Point<dim> &values)
+                              Point<dim> &values)
   {
-      return Point<dim>(-1 * points[1], points[0]);
+      values[0] = -1 * points[1];
+      values[1] = points[0];
   }
 
 
@@ -214,11 +297,10 @@ namespace Step8
     constraints.clear();
     DoFTools::make_hanging_node_constraints(dof_handler, constraints);
 
-
     // Fixing three points or using exact boundary condition.
     if (true)
-      // fixing_three_points();
-      std::cout << " ";
+      fixing_three_points();
+      // std::cout << "Not fixing any points \n";
     else
       VectorTools::interpolate_boundary_values(dof_handler,
                                            0,
@@ -234,9 +316,8 @@ namespace Step8
                                     constraints,
                                     /*keep_constrained_dofs = */ false);
 
-    // setup_nullspace();
-    petsc_nullspace();
-    
+    // petsc_nullspace();    
+    setup_nullspace();
 
     sparsity_pattern.copy_from(dsp);
     system_matrix.reinit(sparsity_pattern);
@@ -307,6 +388,9 @@ namespace Step8
                                 constraints.can_store_line(face_dofs[i]) ){
                                   constraints.add_line(face_dofs[i]);
                                   // printf("x1 \n");
+                                  // for (unsigned int j = 0; j < dof_handler.n_dofs(); ++j)
+                                  //   if (face_dofs[i] != j)
+                                  //     constraints.add_entry(face_dofs[i], j, -1 * global_rotation[j]);
                                 }
                             } 
                             else if (position.distance(location_2) < 1e-2*cell->diameter())
@@ -326,6 +410,9 @@ namespace Step8
                                 constraints.can_store_line(face_dofs[i]) ){
                                   constraints.add_line(face_dofs[i]);
                                   // printf("y1 \n");
+                                  // for (unsigned int j = 0; j < dof_handler.n_dofs(); ++j)
+                                  //   if (face_dofs[i] != j)
+                                      // constraints.add_entry(face_dofs[i], j, -1 * global_x_translation[j]);
                                 }
                           } else if (position.distance(location_2) < 1e-2*cell->diameter())
                           {
@@ -334,6 +421,9 @@ namespace Step8
                                 constraints.can_store_line(face_dofs[i]) ){
                                   constraints.add_line(face_dofs[i]);
                                   // printf("y2 \n");
+                                  // for (unsigned int j = 0; j < dof_handler.n_dofs(); ++j)
+                                  //   if (face_dofs[i] != j)
+                                  //     constraints.add_entry(face_dofs[i], j, -1 * global_y_translation[j]);
                                 }
                           }
                       }
@@ -501,7 +591,6 @@ namespace Step8
       Vector<double> local_rotation(fe_values.dofs_per_cell);
 
       for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
-        printf("x_val is %f, y_val is %f \n", )
         if (i % 2 == 0){
           global_x_translation(i) += 1.0;
         } else {
@@ -626,85 +715,33 @@ namespace Step8
         global_y_translation /= global_y_translation.l2_norm();
     }
 
+
+    construct_nullspace_constraint.close();
+
+    // Defining Nullspace.
+    Nullspace<Vector<double>> nullspace;
+
+    //Normalize
+    global_rotation /= global_rotation.l2_norm();
+    global_x_translation /= global_x_translation.l2_norm();
+    global_y_translation /= global_y_translation.l2_norm();
+
+    // Adding vector to basis.
+    nullspace.basis.push_back(global_rotation);
+    nullspace.basis.push_back(global_x_translation);
+    nullspace.basis.push_back(global_y_translation);
+
+    // Modified Gram Schimidt
+    nullspace.orthogonalize();
+
+    // printf("Global rotation \n");
+    // global_rotation.print(std::cout);
+    // printf("Global x \n");
+    // global_x_translation.print(std::cout);
+    // printf("Global y \n");
+    // global_y_translation.print(std::cout);
+
    }
-   
-  template <class VectorType>
-  class Nullspace
-  {
-    public: 
-    std::vector<VectorType> basis;
-    
-    void orthogonalize();
-    VectorType remove_nullspace(VectorType& rhs);
-
-  };
-
-  template <class VectorType>
-  void Nullspace<VectorType>::orthogonalize(){
-
-    
-    for (unsigned int n = 0; n < basis.size(); ++n)
-      for (unsigned k = 0; k < n; ++k){
-        double tmp_jk = basis[n]*basis[k];
-        basis[k]  = basis[k] - tmp_jk * basis[n];
-      }
-    
-  }
-   
-
-  template<class VectorType>
-  VectorType Nullspace<VectorType>::remove_nullspace(VectorType& rhs){
-
-    for (unsigned int n = 0; n < basis.size(); ++n){
-      double tmp_rhs_inner_product = rhs * basis[n];
-      rhs.add(-1*tmp_rhs_inner_product, basis[n]);
-    }
-
-    return rhs;
-
-  }
-
-  template <typename Range, typename Domain, typename Payload, class VectorType>
-  LinearOperator<Range, Domain, Payload>
-  my_operator(const LinearOperator<Range, Domain, Payload> &op,
-				                         Nullspace<VectorType> &nullspace)
-  {
-      LinearOperator<Range, Domain, Payload> return_op;
-
-      return_op.reinit_range_vector  = op.reinit_range_vector;
-      return_op.reinit_domain_vector = op.reinit_domain_vector;
-
-      return_op.vmult = [&](Range &dest, const Domain &src) {
-          op.vmult(dest, src);   // dest = Phi(src)
-
-          // Projection.
-          for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
-            {
-              double inner_product = nullspace.basis[i]*dest;
-	            dest.add( -1.0*inner_product, nullspace.basis[i]);
-            }
-      };
-
-      return_op.vmult_add = [&](Range &dest, const Domain &src) {
-          std::cout << "before vmult_add" << std::endl;
-          op.vmult_add(dest, src);  // dest += Phi(src)
-          std::cout << "after vmult_add" << std::endl;
-      };
-
-      return_op.Tvmult = [&](Domain &dest, const Range &src) {
-          std::cout << "before Tvmult" << std::endl;
-          op.Tvmult(dest, src);
-          std::cout << "after Tvmult" << std::endl;
-      };
-
-      return_op.Tvmult_add = [&](Domain &dest, const Range &src) {
-          std::cout << "before Tvmult_add" << std::endl;
-          op.Tvmult_add(dest, src);
-          std::cout << "after Tvmult_add" << std::endl;
-      };
-
-      return return_op;
-  }
 
   template <int dim>
   void ElasticProblem<dim>::print_mean_value(){
@@ -740,48 +777,24 @@ namespace Step8
 
     // Operator implementation.
     if (true){
-         // Defining Nullspace.
-        Nullspace<Vector<double>> nullspace;
-
-        //Normalize
-        global_rotation /= global_rotation.l2_norm();
-        global_x_translation /= global_x_translation.l2_norm();
-        global_y_translation /= global_y_translation.l2_norm();
-
-        // Adding vector to basis.
-        nullspace.basis.push_back(global_rotation);
-        nullspace.basis.push_back(global_x_translation);
-        nullspace.basis.push_back(global_y_translation);
-
-        // Modified Gram Schimidt
-        nullspace.orthogonalize();
-
         
-        printf("Global rotation \n");
-        global_rotation.print(std::cout);
-        printf("Global x \n");
-        global_x_translation.print(std::cout);
-        printf("Global y \n");
-        global_y_translation.print(std::cout);
-
-        // // Solving with null space removal
+        // Solving with null space removal
         system_rhs = nullspace.remove_nullspace(system_rhs);
-        auto matrix_op = linear_operator(system_matrix);
+        // auto matrix_op = linear_operator(system_matrix);
+        auto matrix_op = my_operator(linear_operator(preconditioner), nullspace);
         auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
         cg.solve(matrix_op, solution, system_rhs, prec_op);
 
-        // Project out null space from right hand side.
-        // constraints.condense(system_matrix);
-        // constraints.condense(system_rhs);
 
-        // Traditional Solve.
+
+        // // Traditional Solve.
         // cg.solve(system_matrix, solution, system_rhs, preconditioner);
-
-        // Post processing.
-        constraints.distribute(solution);
-        solution = nullspace.remove_nullspace(solution);
+        // // Post processing.
+        // constraints.distribute(solution);
+        // solution = nullspace.remove_nullspace(solution);
         // print_mean_value();
         
+
         // //Print small examples to illustrate.
         // printf("printing system matrix \n");
         // FullMatrix<double> tmp;
@@ -872,15 +885,15 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 7; ++cycle)
+    for (unsigned int cycle = 0; cycle < 12; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
         if (cycle == 0)
           {
-            GridGenerator::hyper_cube(triangulation, -0.5, 0.5);
+            GridGenerator::hyper_cube(triangulation, 0, 1);
             // Colorize will setup atuo.
-            triangulation.refine_global(3);
+            triangulation.refine_global(2);
             if (true)
             for (const auto &cell : triangulation.cell_iterators())
               for (const auto &face : cell->face_iterators())
