@@ -299,8 +299,8 @@ namespace Step8
 
     // Fixing three points or using exact boundary condition.
     if (true)
-      fixing_three_points();
-      // std::cout << "Not fixing any points \n";
+      // fixing_three_points();
+      std::cout << "Not fixing any points \n";
     else
       VectorTools::interpolate_boundary_values(dof_handler,
                                            0,
@@ -328,8 +328,8 @@ namespace Step8
   {
 
     // So far the best pair for lambda = 2; (1)
-    const Point<dim, double> location_1(0.25,0.5);
-    const Point<dim, double> location_2(1.00,0.5);
+    // const Point<dim, double> location_1(0.25,0.5);
+    // const Point<dim, double> location_2(1.00,0.5);
 
     // For lambda = 10: (2)
     // const Point<dim, double> location_1(0.25,0.25);
@@ -340,8 +340,8 @@ namespace Step8
     // const Point<dim, double> location_2(0.0,1.0);
 
     // definitely gonna be there. (4)
-    // const Point<dim, double> location_1(0.0,0.0);
-    // const Point<dim, double> location_2(1.0,1.0);
+    const Point<dim, double> location_1(0.0,0.0);
+    const Point<dim, double> location_2(1.0,1.0);
 
     // tradition:(5)
     // const Point<dim, double> location_1(0.0, 0.5);
@@ -785,12 +785,12 @@ namespace Step8
         auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
         cg.solve(matrix_op, solution, system_rhs, prec_op);
 
-
-
         // // Traditional Solve.
         // cg.solve(system_matrix, solution, system_rhs, preconditioner);
         // // Post processing.
         // constraints.distribute(solution);
+
+
         // solution = nullspace.remove_nullspace(solution);
         // print_mean_value();
         
@@ -885,7 +885,7 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 12; ++cycle)
+    for (unsigned int cycle = 0; cycle < 5; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
