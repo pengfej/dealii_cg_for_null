@@ -58,7 +58,6 @@ namespace Step8
 
   const double lambda_scalar = 2.0;
 
-
   template <class VectorType>
   class Nullspace
   {
@@ -77,6 +76,7 @@ namespace Step8
     for (unsigned int n = 0; n < basis.size(); ++n)
       for (unsigned k = 0; k < n; ++k){
         double tmp_jk = basis[n]*basis[k];
+        // printf("ortho between %d and %d is  %f \n",k, n, tmp_jk);
         basis[k]  = basis[k] - tmp_jk * basis[n];
       }
     
@@ -88,6 +88,7 @@ namespace Step8
 
     for (unsigned int n = 0; n < basis.size(); ++n){
       double tmp_rhs_inner_product = rhs * basis[n];
+      // printf("Removal %f \n", tmp_rhs_inner_product);
       rhs.add(-1*tmp_rhs_inner_product, basis[n]);
     }
 
@@ -161,7 +162,6 @@ namespace Step8
     FESystem<dim> fe;
 
     AffineConstraints<double> constraints; // constructing matrix.
-    // AffineConstraints<double> fixing_point_constraint; // fixing points
     AffineConstraints<double> construct_nullspace_constraint; // constructing null space;
 
     SparsityPattern      sparsity_pattern;
@@ -172,7 +172,7 @@ namespace Step8
     Vector<double> global_rotation;
     Vector<double> global_x_translation;
     Vector<double> global_y_translation;
-    Nullspace<Vector<double>> nullspace;
+    // Nullspace<Vector<double>> nullspace;
   };
 
 
@@ -336,16 +336,30 @@ namespace Step8
     // const Point<dim, double> location_2(0.25,0.75);
 
     // Not very ideal, used to compare: (3)
-    // const Point<dim, double> location_1(1.0,0.0);
-    // const Point<dim, double> location_2(0.0,1.0);
+    const Point<dim, double> location_1(1.0,0.0);
+    const Point<dim, double> location_2(0.0,1.0);
 
     // definitely gonna be there. (4)
-    const Point<dim, double> location_1(0.0,0.0);
-    const Point<dim, double> location_2(1.0,1.0);
+    // const Point<dim, double> location_1(0.0,0.0);
+    // const Point<dim, double> location_2(1.0,1.0);
 
     // tradition:(5)
     // const Point<dim, double> location_1(0.0, 0.5);
     // const Point<dim, double> location_2(1.0, 0.5);
+
+    Vector<double> out_val1(2);
+    Vector<double> out_val2(2);
+
+
+    ExactSolution<dim> tmp;
+    tmp.vector_value(location_1, out_val1);
+    tmp.vector_value(location_2, out_val2);
+    // printf("Exact value of point 1 is : \n");
+    // out_val1.print(std::cout );    
+    // printf("Exact value of point 2 is : \n");
+    // out_val2.print(std::cout );
+    // printf("\n");
+
     
     ComponentMask x_direction(2, false);
     x_direction.set(0, true);
@@ -631,47 +645,74 @@ namespace Step8
       // 2-d Case.
       // Interpolate and Evaluate Curl null space.
       Vector<double> local_rotation(dofs_per_cell);
+      Vector<double> local_rotation_y(dofs_per_cell);
+      Vector<double> local_rotation_x(dofs_per_cell);
       
-
+      
       std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
       global_rotation.reinit(dof_handler.n_dofs());
 
+        // if (false)
         for (auto &cell : dof_handler.active_cell_iterators()){
 
           fe_values.reinit(cell);
           local_rotation = 0;
+          local_rotation_x = 0;
+          local_rotation_y = 0;
 
-           for (const unsigned int i : fe_values.dof_indices())
-          {
-            const unsigned int component_i =
-              fe.system_to_component_index(i).first;
+          // for (const unsigned int i : fe_values.dof_indices()){
+          //   const unsigned int component_i = fe.system_to_component_index(i).first;
+          //   for ( const unsigned int q_point : fe_values.quadrature_point_indices()){
+          //     if (component_i == 0){
+          //       local_rotation(i) += -1 * fe_values.quadrature_point(q_point)[1];
+          //     } else {
+          //       local_rotation(i) += fe_values.quadrature_point(q_point)[0];
+          //     }
+          //   }
+          // }
 
-            for (const unsigned int j : fe_values.dof_indices())
-              {
-                const unsigned int component_j =
-                  fe.system_to_component_index(j).first;
-
-                for (const unsigned int q_point :
-                     fe_values.quadrature_point_indices())
+             for (const unsigned int q_point :
+                          fe_values.quadrature_point_indices())
                   {
-                    local_rotation(i) +=
+                    double tmp_x, tmp_y;
+                  for (const unsigned int i : fe_values.dof_indices())
+                    {
+                      const unsigned int component_i =
+                        fe.system_to_component_index(i).first;
+                 
+                    if (component_i == 0){
+                      // printf("This is a x component, we take second grad term as partial y of ux");
+                       tmp_x = fe_values.shape_grad(i,q_point)[1];
+                    } else {
+                       tmp_y = fe_values.shape_grad(i,q_point)[0];
+                    }
+
+                    local_rotation(i) += tmp_x;
+                    local_rotation(i) += -1 * tmp_y;
+                    // local_rotation(i) +=
                      
-                      ( 
-                        ((component_i != component_j) ?        
-                           (fe_values.shape_grad(i, q_point)[component_j] -
-                            fe_values.shape_grad(j, q_point)[component_i] ) :             
-                           0)                                 
-                        ) *  fe_values.JxW(q_point);                 
+                    //   ( 
+                    //     ((component_i != component_j) ?        
+                    //        (fe_values.shape_grad(i, q_point)[component_j] -
+                    //         fe_values.shape_grad(j, q_point)[component_i] ) :             
+                    //        0)                                 
+                    //     ) *  fe_values.JxW(q_point);                 
                   }
-              }
+              
           }
-            
+
+          // printf("Local rotation: \n");
+          // local_rotation.print(std::cout);
+
+          // printf("Local rotation y: \n");
+          // local_rotation_y.print(std::cout);
 
           cell->get_dof_indices(local_dof_indices);
           construct_nullspace_constraint.distribute_local_to_global(local_rotation, local_dof_indices, global_rotation);
         }
 
-      
+        // printf("rotation: \n");
+        // global_rotation.print(std::cout);
         global_rotation /= global_rotation.l2_norm();
 
       // Interpolate translational null space.
@@ -716,30 +757,15 @@ namespace Step8
     }
 
 
-    construct_nullspace_constraint.close();
-
-    // Defining Nullspace.
-    Nullspace<Vector<double>> nullspace;
-
-    //Normalize
-    global_rotation /= global_rotation.l2_norm();
-    global_x_translation /= global_x_translation.l2_norm();
-    global_y_translation /= global_y_translation.l2_norm();
-
-    // Adding vector to basis.
-    nullspace.basis.push_back(global_rotation);
-    nullspace.basis.push_back(global_x_translation);
-    nullspace.basis.push_back(global_y_translation);
-
-    // Modified Gram Schimidt
-    nullspace.orthogonalize();
-
     // printf("Global rotation \n");
     // global_rotation.print(std::cout);
     // printf("Global x \n");
     // global_x_translation.print(std::cout);
     // printf("Global y \n");
     // global_y_translation.print(std::cout);
+
+
+    construct_nullspace_constraint.close();
 
    }
 
@@ -774,6 +800,14 @@ namespace Step8
     preconditioner.initialize(system_matrix, 1.2);
 
 
+    // Defining Nullspace.
+    Nullspace<Vector<double>> nullspace;
+
+    // Adding vector to basis.
+    nullspace.basis.push_back(global_rotation);
+    nullspace.basis.push_back(global_x_translation);
+    nullspace.basis.push_back(global_y_translation);
+
 
     // Operator implementation.
     if (true){
@@ -789,10 +823,10 @@ namespace Step8
         // cg.solve(system_matrix, solution, system_rhs, preconditioner);
         // // Post processing.
         // constraints.distribute(solution);
+        // // solution.print(std::cout);
 
-
-        // solution = nullspace.remove_nullspace(solution);
-        // print_mean_value();
+        solution = nullspace.remove_nullspace(solution);
+        print_mean_value();
         
 
         // //Print small examples to illustrate.
@@ -885,7 +919,7 @@ namespace Step8
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 5; ++cycle)
+    for (unsigned int cycle = 0; cycle < 7; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 

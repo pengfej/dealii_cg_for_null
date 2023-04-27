@@ -34,6 +34,7 @@
 #include <deal.II/base/function.h>
 #include <deal.II/base/logstream.h>
 #include <deal.II/base/table_handler.h>
+#include <deal.II/fe/fe_update_flags.h>
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/solver_cg.h>
@@ -63,6 +64,56 @@ namespace Step11
 {
   using namespace dealii;
 
+
+  template <class VectorType>
+  struct Nullspace
+  {
+    std::vector<VectorType> basis;
+  };
+  
+  
+  template <typename Range, typename Domain, typename Payload, class VectorType>
+  LinearOperator<Range, Domain, Payload>
+  my_operator(const LinearOperator<Range, Domain, Payload> &op,
+				                         Nullspace<VectorType> &nullspace)
+  {
+      LinearOperator<Range, Domain, Payload> return_op;
+
+      return_op.reinit_range_vector  = op.reinit_range_vector;
+      return_op.reinit_domain_vector = op.reinit_domain_vector;
+
+      return_op.vmult = [&](Range &dest, const Domain &src) {
+          op.vmult(dest, src);   // dest = Phi(src)
+
+          // Projection.
+          for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
+            {
+              double inner_product = nullspace.basis[i]*dest;
+	      dest.add( -1.0*inner_product, nullspace.basis[i]);
+            }
+      };
+
+      return_op.vmult_add = [&](Range &dest, const Domain &src) {
+          std::cout << "before vmult_add" << std::endl;
+          op.vmult_add(dest, src);  // dest += Phi(src)
+          std::cout << "after vmult_add" << std::endl;
+      };
+
+      return_op.Tvmult = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult" << std::endl;
+          op.Tvmult(dest, src);
+          std::cout << "after Tvmult" << std::endl;
+      };
+
+      return_op.Tvmult_add = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult_add" << std::endl;
+          op.Tvmult_add(dest, src);
+          std::cout << "after Tvmult_add" << std::endl;
+      };
+
+      return return_op;
+  }
+
   template <int dim>
   class LaplaceProblem
   {
@@ -72,7 +123,8 @@ namespace Step11
 
   private:
     void setup_system();
-    void assemble_and_solve();
+    void assemble_and_solve(bool condense_option);
+    void interpolate_nullspace();
     void solve();
     void write_high_order_mesh(const unsigned cycle);
 
@@ -87,6 +139,7 @@ namespace Step11
 
     Vector<double> solution;
     Vector<double> system_rhs;
+    Vector<double> global_constraint;
 
     TableHandler output_table;
   };
@@ -112,6 +165,7 @@ namespace Step11
     dof_handler.distribute_dofs(fe);
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
+    global_constraint.reinit(dof_handler.n_dofs());
 
     const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
 
@@ -122,12 +176,16 @@ namespace Step11
     if (true) // disabled
     {
       // add a constraint to get mean 0 on boundary!
-    mean_value_constraints.add_line(first_boundary_dof);
-    for (types::global_dof_index i : boundary_dofs)
-      if (i != first_boundary_dof)
-        mean_value_constraints.add_entry(first_boundary_dof, i, -1);
+      mean_value_constraints.add_line(first_boundary_dof);
+      for (types::global_dof_index i : boundary_dofs)
+        if (i != first_boundary_dof)
+          mean_value_constraints.add_entry(first_boundary_dof, i, -1);
+    } else {
+      // mean_value_constraints.add_line(5);
+      interpolate_nullspace();
     }
 
+    interpolate_nullspace();
     mean_value_constraints.close();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -138,10 +196,44 @@ namespace Step11
     system_matrix.reinit(sparsity_pattern);
   }
 
+  template<int dim>
+  void LaplaceProblem<dim>::interpolate_nullspace(){
+    const unsigned int gauss_degree =
+      std::max(static_cast<unsigned int>(
+                 std::ceil(1. * (mapping.get_degree() + 1) / 2)),
+               2U);
+
+    QGauss<dim> quadrature_formula(gauss_degree);
+    std::vector<types::global_dof_index> local_dof_indices(fe.n_dofs_per_cell());
+
+
+    FEValues<dim, dim> fe_values(fe, quadrature_formula, update_JxW_values | update_values );
+    Vector<double> local_constraint(fe_values.dofs_per_cell);
+
+    for (const auto &cell : dof_handler.active_cell_iterators()){
+      local_constraint = 0;
+      fe_values.reinit(cell);
+      for (unsigned int q_point = 0; q_point < fe_values.n_quadrature_points; ++q_point){
+        for (unsigned int i = 0; i < fe_values.dofs_per_cell; ++i){
+          local_constraint(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
+        }
+      }
+
+
+    cell->get_dof_indices(local_dof_indices);
+    const unsigned int dofs_per_cell = fe_values.dofs_per_cell;
+    for (unsigned int i = 0; i < dofs_per_cell; ++i)
+      global_constraint(local_dof_indices[i]) += local_constraint(i);
+
+    // local_constraint.print(std::cout);
+    // mean_value_constraints.distribute_local_to_global(local_constraint, local_dof_indices, global_constraint);
+
+    }
+  }
 
 
   template <int dim>
-  void LaplaceProblem<dim>::assemble_and_solve()
+  void LaplaceProblem<dim>::assemble_and_solve(bool condense_option)
   {
     const unsigned int gauss_degree =
       std::max(static_cast<unsigned int>(
@@ -165,11 +257,13 @@ namespace Step11
       tmp);
     system_rhs += tmp;
 
-    mean_value_constraints.condense(system_matrix);
-    mean_value_constraints.condense(system_rhs);
+    if (condense_option){
+      solve();
+    } else {
+      solve();
+      // mean_value_constraints.distribute(solution);
 
-    solve();
-    mean_value_constraints.distribute(solution);
+    }
 
     Vector<float> norm_per_cell(triangulation.n_active_cells());
     VectorTools::integrate_difference(mapping,
@@ -198,15 +292,74 @@ namespace Step11
   {
     using VectorType = Vector<double>;
 
-    SolverControl            solver_control(1000, 1e-12*system_rhs.l2_norm(), false);
+    SolverControl            solver_control(1000, 1e-12);
     SolverCG<VectorType>     solver(solver_control);
 
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    solver.solve(system_matrix, solution, system_rhs, preconditioner);
+    if (false){
+      // Defining Nullspace.  
+      Nullspace<VectorType> nullspace;
+
+      Vector<double> global_constraint(dof_handler.n_dofs());
+      for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
+        global_constraint(i) += 1; 
+      }
+
+      global_constraint /= global_constraint.l2_norm();
+      nullspace.basis.push_back(global_constraint);
+
+      // original matrix, but projector after preconditioner
+      auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
+      // auto matrix_op = linear_operator(system_matrix);
+      auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
+
+      // remove nullspace from RHS
+      double r=system_rhs*global_constraint;
+      system_rhs.add(-1.0*r, global_constraint);
+      // std::cout << "r=" << r << std::endl;
+      solver.solve(matrix_op, solution, system_rhs, prec_op);
+      solution.print(std::cout);
+    } else {
+
+
+      // Vector<double> global_constraint(dof_handler.n_dofs());
+      // for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
+      //   global_constraint(i) += 1; 
+      // }
+      mean_value_constraints.condense(system_matrix);
+      mean_value_constraints.condense(system_rhs);
+      solver.solve(system_matrix, solution, system_rhs, preconditioner);
+      mean_value_constraints.distribute(solution);
+      double solution_inner = solution * global_constraint;
+      solution.add(-1 * solution_inner, global_constraint);
+      solution.print(std::cout);
+    }
+    
   }
 
+  template <int dim>
+  void LaplaceProblem<dim>::write_high_order_mesh(const unsigned cycle)
+  {
+    DataOut<dim> data_out;
+  
+    DataOutBase::VtkFlags flags;
+    flags.write_higher_order_cells = true;
+    data_out.set_flags(flags);
+  
+    data_out.attach_dof_handler(dof_handler);
+    data_out.add_data_vector(solution, "solution");
+  
+    data_out.build_patches(mapping,
+                          mapping.get_degree(),
+                          DataOut<dim>::curved_inner_cells);
+  
+    std::ofstream file("solution-c=" + std::to_string(cycle) +
+                      ".p=" + std::to_string(mapping.get_degree()) + ".vtu");
+  
+    data_out.write_vtu(file);
+  }
 
 
   template <int dim>
@@ -214,11 +367,11 @@ namespace Step11
   {
     GridGenerator::hyper_ball(triangulation);
 
-    for (unsigned int cycle = 0; cycle < 6; ++cycle)
+    for (unsigned int cycle = 0; cycle < 1; ++cycle)
       {
         setup_system();
-        assemble_and_solve();
-        // write_high_order_mesh(cycle);
+        assemble_and_solve(true);
+        write_high_order_mesh(cycle);
 
         triangulation.refine_global();
       }

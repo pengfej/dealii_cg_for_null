@@ -4,6 +4,8 @@ ElasticityWithCurl/CMakeCache*
 ElasticityWithCurl/Make*
 ElasticityWithCurl/step-8
 ElasticityWithCurl/solution*
+ElasticityWithCurl/case*
+ElasticityWithCurl/tmp
 
 StokesProblem/step-55/CMakeFiles/
 StokesProblem/step-55/cmake*
@@ -16,3 +18,5 @@ StokesProblem/step-56/cmake*
 StokesProblem/step-56/CMakeCache*
 StokesProblem/step-56/Make*
 StokesProblem/step-56/step-56
+
+laplace/
