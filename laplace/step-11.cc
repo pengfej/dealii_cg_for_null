@@ -30,11 +30,16 @@
  */
 
 
+#include <boost/container/vector.hpp>
+#include <boost/integer.hpp>
+#include <deal.II/base/numbers.h>
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/function.h>
 #include <deal.II/base/logstream.h>
 #include <deal.II/base/table_handler.h>
+#include <deal.II/base/types.h>
 #include <deal.II/fe/fe_update_flags.h>
+#include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/sparse_matrix.h>
 #include <deal.II/lac/solver_cg.h>
@@ -55,6 +60,8 @@
 #include <deal.II/lac/dynamic_sparsity_pattern.h>
 
 #include <algorithm>
+#include <deal.II/numerics/vector_tools_common.h>
+#include <deal.II/numerics/vector_tools_interpolate.h>
 #include <deal.II/numerics/vector_tools_mean_value.h>
 #include <iostream>
 #include <iomanip>
@@ -63,7 +70,6 @@
 namespace Step11
 {
   using namespace dealii;
-
 
   template <class VectorType>
   struct Nullspace
@@ -89,7 +95,8 @@ namespace Step11
           for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
             {
               double inner_product = nullspace.basis[i]*dest;
-	      dest.add( -1.0*inner_product, nullspace.basis[i]);
+      	      dest.add( -1.0*inner_product, nullspace.basis[i]);
+              // printf("One iteration done! \n");
             }
       };
 
@@ -115,6 +122,43 @@ namespace Step11
   }
 
   template <int dim>
+  class Solution : public Function<dim>
+  {
+  public:
+    virtual double value(const Point<dim> & p, const unsigned int component = 0) const override;
+  };
+ 
+ 
+  template <int dim>
+  double Solution<dim>::value(const Point<dim> &p,
+                              const unsigned int) const
+  {
+    double return_value = std::sin(numbers::PI * p[0]) * std::cos(numbers::PI * p[1]);
+    
+    return return_value;
+  }
+ 
+ 
+ 
+  template <int dim>
+  class RightHandSide : public Function<dim>
+  {
+  public:
+    virtual double value(const Point<dim> & p, const unsigned int component = 0) const override;
+  };
+ 
+ 
+  template <int dim>
+  double RightHandSide<dim>::value(const Point<dim> &p, const unsigned int) const
+  {
+    double return_value = 2*numbers::PI * numbers::PI 
+                           * std::sin(numbers::PI * p[0]) 
+                           * std::cos(numbers::PI * p[1]);
+
+    return return_value;
+  }
+
+  template <int dim>
   class LaplaceProblem
   {
   public:
@@ -123,8 +167,9 @@ namespace Step11
 
   private:
     void setup_system();
-    void assemble_and_solve(bool condense_option);
+    void assemble_and_solve();
     void interpolate_nullspace();
+    void construct_neumann_boundary();
     void solve();
     void write_high_order_mesh(const unsigned cycle);
 
@@ -167,25 +212,13 @@ namespace Step11
     system_rhs.reinit(dof_handler.n_dofs());
     global_constraint.reinit(dof_handler.n_dofs());
 
-    const IndexSet boundary_dofs = DoFTools::extract_boundary_dofs(dof_handler);
-
-    const types::global_dof_index first_boundary_dof =
-      boundary_dofs.nth_index_in_set(0);
-
-    mean_value_constraints.clear();
-    if (true) // disabled
-    {
-      // add a constraint to get mean 0 on boundary!
-      mean_value_constraints.add_line(first_boundary_dof);
-      for (types::global_dof_index i : boundary_dofs)
-        if (i != first_boundary_dof)
-          mean_value_constraints.add_entry(first_boundary_dof, i, -1);
-    } else {
-      // mean_value_constraints.add_line(5);
-      interpolate_nullspace();
-    }
-
     interpolate_nullspace();
+
+    mean_value_constraints.clear();  
+    // mean_value_constraints.add_line(0);
+    mean_value_constraints.add_line(dof_handler.n_dofs()-1);
+    // for (unsigned int i = 1; i < dof_handler.n_dofs(); ++i)
+    //   mean_value_constraints.add_entry(0, i, -1 * global_constraint[i]);
     mean_value_constraints.close();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
@@ -197,7 +230,8 @@ namespace Step11
   }
 
   template<int dim>
-  void LaplaceProblem<dim>::interpolate_nullspace(){
+  void LaplaceProblem<dim>::interpolate_nullspace()
+  {
     const unsigned int gauss_degree =
       std::max(static_cast<unsigned int>(
                  std::ceil(1. * (mapping.get_degree() + 1) / 2)),
@@ -205,7 +239,6 @@ namespace Step11
 
     QGauss<dim> quadrature_formula(gauss_degree);
     std::vector<types::global_dof_index> local_dof_indices(fe.n_dofs_per_cell());
-
 
     FEValues<dim, dim> fe_values(fe, quadrature_formula, update_JxW_values | update_values );
     Vector<double> local_constraint(fe_values.dofs_per_cell);
@@ -225,66 +258,156 @@ namespace Step11
     for (unsigned int i = 0; i < dofs_per_cell; ++i)
       global_constraint(local_dof_indices[i]) += local_constraint(i);
 
-    // local_constraint.print(std::cout);
-    // mean_value_constraints.distribute_local_to_global(local_constraint, local_dof_indices, global_constraint);
-
     }
   }
 
 
   template <int dim>
-  void LaplaceProblem<dim>::assemble_and_solve(bool condense_option)
+  void LaplaceProblem<dim>::construct_neumann_boundary(){
+
+    const unsigned int gauss_degree =
+              std::max(static_cast<unsigned int>(
+              std::ceil(1. * (mapping.get_degree() + 1) / 2)),
+            2U);
+
+    QGauss<dim-1> face_quadrature_formula(gauss_degree+ 1);
+    QGauss<dim> quadrature_formula(gauss_degree+ 1);
+
+    FEValues<dim> fe_values(fe, 
+                            quadrature_formula,
+                            update_values | update_gradients | update_quadrature_points | update_JxW_values);
+
+    FEFaceValues<dim> fe_face_values(fe,
+                                     face_quadrature_formula,
+                                     update_values  | update_quadrature_points | update_JxW_values);
+    
+    const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
+    const unsigned int n_face_q_points = face_quadrature_formula.size();
+    // const unsigned int n_q_point(quadrature_formula.size());
+    std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+
+
+    RightHandSide<dim> rhs_func;
+    // std::vector<double> rhs_value(n_q_point);
+    FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
+    Vector<double> cell_rhs(dofs_per_cell);
+
+    for (const auto &cell : dof_handler.active_cell_iterators())
+    {
+      cell_rhs = 0;
+      cell_matrix = 0;
+      fe_values.reinit(cell);
+
+      // rhs_func.value_list(fe_values.get_quadrature_points(), rhs_value);
+
+      if (false)
+      for (unsigned int q_point : fe_values.quadrature_point_indices())
+      {
+        for (unsigned int i : fe_values.dof_indices())
+        {
+          for (unsigned int j : fe_values.dof_indices())
+          {
+
+            cell_matrix(i,j) += fe_values.shape_grad(i,q_point) *
+                                fe_values.shape_grad(j,q_point) * 
+                                fe_values.JxW(q_point);
+          }
+
+          double x = fe_values.quadrature_point(q_point)[0];
+          double y = fe_values.quadrature_point(q_point)[1];
+          double F_val = std::sin(numbers::PI * x) * std::cos(numbers::PI * y);
+          cell_rhs(i) += (fe_values.shape_value(i, q_point) * // phi_i(x_q)
+                            F_val *                     // f(x_q)      
+                            fe_values.JxW(q_point));              // dx
+        }
+      }
+
+      // Evaluating boundary values.
+      if(true)
+      for (const auto &face : cell->face_iterators())
+      {
+          if ( face->at_boundary() )
+          {
+            fe_face_values.reinit(cell,face);
+            for (unsigned int q_point = 0; q_point < n_face_q_points; ++q_point)
+                { 
+                  for (unsigned int i = 0; i < dofs_per_cell; ++i)
+                    {
+
+                      double x1 = fe_face_values.quadrature_point(q_point)[0];
+                      double x2 = fe_face_values.quadrature_point(q_point)[1];
+                       
+                      double G;
+
+                      if (face->boundary_id() == 1){
+                        G = numbers::PI * std::cos(numbers::PI * x1) * std::cos(numbers::PI * x2);
+                      } else if (face-> boundary_id() == 2){
+                        G = numbers::PI * std::sin(numbers::PI * x1) * std::sin(numbers::PI * x2);
+                      } else if (face-> boundary_id() == 3){
+                        G = -1 * numbers::PI * std::cos(numbers::PI * x1) * std::cos(numbers::PI * x2);
+                      } else if (face-> boundary_id() == 4){
+                        G = -1 * numbers::PI * std::sin(numbers::PI * x1) * std::sin(numbers::PI * x2);
+                      }
+
+                      cell_rhs(i) += (fe_face_values.shape_value(i, q_point) *  // phi_i(x_q)
+                                      G *                                         // g(x_q)
+                                      fe_face_values.JxW(q_point));            // dx
+                    }
+                }
+            } 
+      }  
+
+      cell->get_dof_indices(local_dof_indices);
+      mean_value_constraints.distribute_local_to_global( cell_matrix, cell_rhs, local_dof_indices,system_matrix, system_rhs );
+    }
+  }
+
+  template <int dim>
+  void LaplaceProblem<dim>::assemble_and_solve()
   {
     const unsigned int gauss_degree =
       std::max(static_cast<unsigned int>(
                  std::ceil(1. * (mapping.get_degree() + 1) / 2)),
                2U);
+
     MatrixTools::create_laplace_matrix(mapping,
                                        dof_handler,
                                        QGauss<dim>(gauss_degree),
                                        system_matrix);
+
+    
     VectorTools::create_right_hand_side(mapping,
                                         dof_handler,
                                         QGauss<dim>(gauss_degree),
-                                        Functions::ConstantFunction<dim>(-2),
+                                        RightHandSide<dim>(),
                                         system_rhs);
-    Vector<double> tmp(system_rhs.size());
-    VectorTools::create_boundary_right_hand_side(
-      mapping,
-      dof_handler,
-      QGauss<dim - 1>(gauss_degree),
-      Functions::ConstantFunction<dim>(1),
-      tmp);
-    system_rhs += tmp;
 
-    if (condense_option){
-      solve();
-    } else {
-      solve();
-      // mean_value_constraints.distribute(solution);
 
-    }
+    construct_neumann_boundary();
+    
+    solve();
 
-    Vector<float> norm_per_cell(triangulation.n_active_cells());
-    VectorTools::integrate_difference(mapping,
-                                      dof_handler,
+    Vector<double> cellwise_error(triangulation.n_active_cells());
+    QGauss<dim> quadrature(gauss_degree);
+    VectorTools::integrate_difference(dof_handler, 
                                       solution,
-                                      Functions::ZeroFunction<dim>(),
-                                      norm_per_cell,
-                                      QGauss<dim>(gauss_degree + 1),
-                                      VectorTools::H1_seminorm);
+                                      Solution<dim>(),
+                                      cellwise_error,
+                                      quadrature,
+                                      VectorTools::L2_norm);
+
     const double norm =
       VectorTools::compute_global_error(triangulation,
-                                        norm_per_cell,
-                                        VectorTools::H1_seminorm);
+                                        cellwise_error,
+                                        VectorTools::L2_norm);
 
-    double mean_value = VectorTools::compute_mean_value(mapping, dof_handler, QGauss<dim>(gauss_degree),solution,0 );
+
+    double mean_value = VectorTools::compute_mean_value(mapping, dof_handler, QGauss<dim>(gauss_degree),solution, 0);
 
     output_table.add_value("cells", triangulation.n_active_cells());
-    output_table.add_value("|u|_1", norm);
-    output_table.add_value("error",
-                           std::fabs(norm - std::sqrt(3.14159265358 / 2)));
+    output_table.add_value("error", norm);
     output_table.add_value("MeanValue", mean_value);
+    // std::cout << std::endl;
   }
 
   template <int dim>
@@ -302,17 +425,17 @@ namespace Step11
       // Defining Nullspace.  
       Nullspace<VectorType> nullspace;
 
-      Vector<double> global_constraint(dof_handler.n_dofs());
-      for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
-        global_constraint(i) += 1; 
-      }
+      // Vector<double> global_constraint(dof_handler.n_dofs());
+      // for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
+      //   global_constraint(i) += 1; 
+      // }
 
       global_constraint /= global_constraint.l2_norm();
       nullspace.basis.push_back(global_constraint);
 
       // original matrix, but projector after preconditioner
-      auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
-      // auto matrix_op = linear_operator(system_matrix);
+      // auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
+      auto matrix_op = linear_operator(system_matrix);
       auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
       // remove nullspace from RHS
@@ -320,21 +443,27 @@ namespace Step11
       system_rhs.add(-1.0*r, global_constraint);
       // std::cout << "r=" << r << std::endl;
       solver.solve(matrix_op, solution, system_rhs, prec_op);
-      solution.print(std::cout);
-    } else {
 
+      // double solution_inner = solution * global_constraint;
+      // solution.add(-1 * solution_inner, global_constraint);
+    } else {
 
       // Vector<double> global_constraint(dof_handler.n_dofs());
       // for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
       //   global_constraint(i) += 1; 
       // }
+      // global_constraint /= global_constraint.l2_norm();
+      
+      // double rhs_inner = system_rhs * global_constraint;
+      // solution.add(-1 * rhs_inner, global_constraint);
+
       mean_value_constraints.condense(system_matrix);
       mean_value_constraints.condense(system_rhs);
       solver.solve(system_matrix, solution, system_rhs, preconditioner);
       mean_value_constraints.distribute(solution);
-      double solution_inner = solution * global_constraint;
-      solution.add(-1 * solution_inner, global_constraint);
-      solution.print(std::cout);
+
+      // double solution_inner = solution * global_constraint;
+      // solution.add(-1 * solution_inner, global_constraint);
     }
     
   }
@@ -350,6 +479,13 @@ namespace Step11
   
     data_out.attach_dof_handler(dof_handler);
     data_out.add_data_vector(solution, "solution");
+
+    Vector<double> exact(dof_handler.n_dofs());
+    exact = 0;
+    VectorTools::interpolate(dof_handler, Solution<dim>(), exact);
+    // exact.print(std::cout);
+
+    data_out.add_data_vector(exact, "ExactSolution");
   
     data_out.build_patches(mapping,
                           mapping.get_degree(),
@@ -365,22 +501,44 @@ namespace Step11
   template <int dim>
   void LaplaceProblem<dim>::run()
   {
-    GridGenerator::hyper_ball(triangulation);
+    GridGenerator::hyper_cube(triangulation, -1.0, 1.0);
+    triangulation.refine_global(2);
+    for (const auto &cell : triangulation.active_cell_iterators())
+      for (const auto &face : cell->face_iterators())
+        {
+          // setup boundary id.
+          if (face-> at_boundary()){
+            const auto center = face->center();
+            if ((std::fabs(center(0) - (1.0)) < 1e-16) ){
+              // Left boundary.
+              face->set_boundary_id(1);
+            } else if ((std::fabs(center(0) - (-1.0)) < 1e-16 )){
+              // Right boundary.
+              face->set_boundary_id(3); 
+            }else if ((std::fabs(center(1) - (-1.0)) < 1e-16 )){
+              // top boundary.
+              face->set_boundary_id(2); 
+            }else if ((std::fabs(center(1) - (1.0)) < 1e-16 )){
+              // bottom boundary.
+              face->set_boundary_id(4); 
+            }
+          }
+        }
 
-    for (unsigned int cycle = 0; cycle < 1; ++cycle)
+
+    for (unsigned int cycle = 0; cycle < 8; ++cycle)
       {
         setup_system();
-        assemble_and_solve(true);
+        assemble_and_solve();
         write_high_order_mesh(cycle);
 
         triangulation.refine_global();
       }
 
-    output_table.set_precision("|u|_1", 6);
     output_table.set_precision("error", 6);
     output_table.set_precision("MeanValue", 6);
     output_table.write_text(std::cout);
-    std::cout << std::endl;
+    // std::cout << std::endl;
   }
 } 
 

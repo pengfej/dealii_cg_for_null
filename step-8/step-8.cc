@@ -513,7 +513,7 @@ class Translate: public Function<dim>
         // boundary conditions.
         if (true)
         for (const auto &face : cell->face_iterators())
-          if (true &&(face->at_boundary()) ){
+          if ((face->at_boundary()) ){
             fe_face_values.reinit(cell,face);
             for (unsigned int q_point = 0; q_point < n_face_q_points; ++q_point)
                 { 
@@ -630,8 +630,8 @@ class Translate: public Function<dim>
     else
     {
         // Set constrainted dof and rhs to zero.
-        constraints.set_zero(solution);
-        constraints.set_zero(system_rhs);
+        // constraints.set_zero(solution);
+        // constraints.set_zero(system_rhs);
 
         // Traditional Solve.
         cg.solve(system_matrix, solution, system_rhs, preconditioner);
