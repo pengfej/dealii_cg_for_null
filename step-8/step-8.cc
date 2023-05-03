@@ -19,6 +19,7 @@
 
 
 // @sect3{Include files}
+#include <boost/container/detail/construct_in_place.hpp>
 #include <cmath>
 #include <deal.II/base/numbers.h>
 #include <deal.II/base/point.h>
@@ -176,11 +177,10 @@ class Rot: public Function<dim>
     virtual void vector_value(const Point<dim> &p,
                               Vector<double> &  values) const override
                               {
-                                values[0] = (p(1)-0.5);
-                                values[1] = -(p(0)-0.5);
-                                // values[0] = (p(1));
-                                // values[1] = -(p(0));
-
+                                values[0] = -(p(1)+0.5);
+                                values[1] =  (p(0)+0.5);
+                                // values[0] = -(p(1));
+                                // values[1] =  (p(0));
                               }
 };
 
@@ -195,7 +195,7 @@ class Translate: public Function<dim>
     virtual void vector_value(const Point<dim> &p,
                               Vector<double> &  values) const override
                               {
-                                values = 0.;
+                                values = 0.0;
                                 values[component] = 1;//(p(component)-0.5);
                               }
 
@@ -241,8 +241,8 @@ class Translate: public Function<dim>
     void solve();
     void refine_grid();
     void output_results(const unsigned int cycle) const;
-    void petsc_nullspace();
     void setup_nullspace();
+    void interpolate_nullspace();
     void fixing_three_points();
     void print_mean_value();
 
@@ -290,9 +290,9 @@ class Translate: public Function<dim>
       //std::cout << "Not fixing any points \n";
     else
       VectorTools::interpolate_boundary_values(dof_handler,
-                                           0,
-                                           ExactSolution<dim>(),
-                                           constraints);
+                                                0,
+                                                ExactSolution<dim>(),
+                                                constraints);
  
  
     constraints.close();
@@ -304,6 +304,8 @@ class Translate: public Function<dim>
                                     /*keep_constrained_dofs = */ false);
 
     setup_nullspace();
+
+    // interpolate_nullspace();
 
     sparsity_pattern.copy_from(dsp);
     system_matrix.reinit(sparsity_pattern);
@@ -551,14 +553,96 @@ class Translate: public Function<dim>
   }
 
   template <int dim>
-  void ElasticProblem<dim>::setup_nullspace()
-  { 
+  void ElasticProblem<dim>::interpolate_nullspace()
+  {
+
     QGauss<dim> quadrature_formula(fe.degree + 1);
+
     FEValues<dim> fe_values(fe,
                             quadrature_formula,
                             update_values | update_gradients |
                               update_quadrature_points | update_JxW_values);
 
+    const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
+
+    Vector<double> cell_rotation(dofs_per_cell);
+    Vector<double> local_x_translation(dofs_per_cell);
+    Vector<double> local_y_translation(dofs_per_cell);
+    Vector<double> grad_ux(dofs_per_cell);
+    Vector<double> grad_uy(dofs_per_cell);
+
+    global_rotation.reinit(dof_handler.n_dofs());
+    global_x_translation.reinit(dof_handler.n_dofs());
+    global_y_translation.reinit(dof_handler.n_dofs());
+
+    std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+
+
+    for (const auto &cell : dof_handler.active_cell_iterators())
+      {
+        cell_rotation = 0;
+        grad_ux = 0;
+        grad_uy = 0;
+
+        local_x_translation = 0;
+        local_y_translation = 0;
+        fe_values.reinit(cell);
+
+        for (const unsigned int i : fe_values.dof_indices())
+          {
+              for (const unsigned int q_point : fe_values.quadrature_point_indices())
+                {
+                  const unsigned int component_i = fe.system_to_component_index(i).first;
+                  if (component_i == 0)
+                  {
+                    cell_rotation(i) += -(fe_values.shape_grad(i,q_point)[1]);
+                    local_x_translation(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
+                    // This will look like (number, 0, number, 0, ...)
+                  }
+                  else 
+                  {
+                    cell_rotation(i-1) += fe_values.shape_grad(i,q_point)[0];
+                    local_y_translation(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
+                    // This will look like (0, number, 0, number, ...)
+                  }
+                }
+
+            // for (unsigned int i = 0; i < dofs_per_cell-1; ++ i)
+            // {
+            //   cell_rotation(i) += grad_uy(i+1) - grad_ux(i);
+            // }
+           
+          }
+
+        // cell_rotation.print(std::cout);
+            
+        cell->get_dof_indices(local_dof_indices);
+
+        for (unsigned int i = 0; i < dofs_per_cell; ++ i)
+        {
+          global_rotation[local_dof_indices[i]] += cell_rotation[i];
+          global_x_translation[local_dof_indices[i]] += local_x_translation[i];
+          global_y_translation[local_dof_indices[i]] += local_y_translation[i];
+        }
+
+        // cell->get_dof_indices(local_dof_indices);
+        // constraints.distribute_local_to_global( cell_rotation, local_dof_indices, global_rotation);
+        // constraints.distribute_local_to_global( local_x_translation, local_dof_indices, global_x_translation);
+        // constraints.distribute_local_to_global( local_y_translation, local_dof_indices, global_y_translation);
+
+      }
+
+      global_rotation /= global_rotation.l2_norm();
+      global_x_translation /= global_x_translation.l2_norm();
+      global_y_translation /= global_y_translation.l2_norm();
+      // global_rotation.print(std::cout);
+      
+  }
+
+
+  template <int dim>
+  void ElasticProblem<dim>::setup_nullspace()
+  { 
     global_rotation.reinit(dof_handler.n_dofs());
     global_x_translation.reinit(dof_handler.n_dofs());
     global_y_translation.reinit(dof_handler.n_dofs());
@@ -607,6 +691,10 @@ class Translate: public Function<dim>
     // Defining Nullspace.
     nullspace.basis.clear();
 
+    // constraints.condense(global_rotation);
+    // constraints.condense(global_x_translation);
+    // constraints.condense(global_y_translation);
+
     // Adding vector to basis.
     nullspace.basis.push_back(global_rotation);
     nullspace.basis.push_back(global_x_translation);
@@ -633,10 +721,11 @@ class Translate: public Function<dim>
         // constraints.set_zero(solution);
         // constraints.set_zero(system_rhs);
 
+
         // Traditional Solve.
         cg.solve(system_matrix, solution, system_rhs, preconditioner);
 
-        // // Post processing.
+        // Post processing.
         constraints.distribute(solution);
         solution = nullspace.remove_nullspace(solution);
         // print_mean_value();
@@ -745,7 +834,7 @@ class Translate: public Function<dim>
           {
             GridGenerator::hyper_cube(triangulation, 0, 1);
             // Colorize will setup atuo.
-            triangulation.refine_global(4);
+            triangulation.refine_global(2);
             if (true)
             for (const auto &cell : triangulation.cell_iterators())
               for (const auto &face : cell->face_iterators())
