@@ -19,6 +19,7 @@
 
 
 // @sect3{Include files}
+#include <bits/types/error_t.h>
 #include <boost/container/detail/construct_in_place.hpp>
 #include <cmath>
 #include <deal.II/base/numbers.h>
@@ -50,6 +51,8 @@
 #include <deal.II/fe/component_mask.h>
 #include <deal.II/lac/sparse_direct.h>
 
+#include <deal.II/numerics/vector_tools_boundary.h>
+#include <deal.II/numerics/vector_tools_interpolate.h>
 #include <fstream>
 #include <iostream>
 
@@ -151,20 +154,22 @@ namespace Step8
     Assert(dim >= 2, ExcNotImplemented());
 
     for (unsigned int pt = 0; pt < points.size(); ++pt){
-      values[pt][0] = -1*pi*pi*std::sin(pi*points[pt][0]) * 
-                        std::sin(pi * points[pt][1])     +
-                        2*pi*pi*(1/lambda_scalar + 1)    * 
-                        std::cos(pi*points[pt][0])       * 
-                        std::sin(pi*points[pt][1]);
+      const double x1 = points[pt][0];
+      const double x2 = points[pt][1];
 
-      values[pt][1] = -1* pi*pi*std::cos(pi*points[pt][0]) *
-                        std::cos(pi * points[pt][1])     +
+      values[pt][0] = -1*pi*pi*std::sin(pi*x1) * 
+                        std::sin(pi * x2)     +
+                        2*pi*pi*(1/lambda_scalar + 1)    * 
+                        std::cos(pi*x1)       * 
+                        std::sin(pi*x2);
+
+      values[pt][1] = -1* pi*pi*std::cos(pi*x1) *
+                        std::cos(pi * x2)     +
                         2*pi*pi*(1/lambda_scalar + 1)    *
-                        std::sin(pi*points[pt][0])       *
-                        std::cos(pi*points[pt][1]);
+                        std::sin(pi*x1)       *
+                        std::cos(pi*x2);
     }
   }
-
 
 template <int dim>
 class Rot: public Function<dim>
@@ -177,8 +182,8 @@ class Rot: public Function<dim>
     virtual void vector_value(const Point<dim> &p,
                               Vector<double> &  values) const override
                               {
-                                values[0] = -(p(1)+0.5);
-                                values[1] =  (p(0)+0.5);
+                                values[0] = -(p(1)-0.5) ;
+                                values[1] =  (p(0)-0.5) ;
                                 // values[0] = -(p(1));
                                 // values[1] =  (p(0));
                               }
@@ -460,7 +465,7 @@ class Translate: public Function<dim>
         lambda.value_list(fe_values.get_quadrature_points(), lambda_values);
         mu.value_list(fe_values.get_quadrature_points(), mu_values);
         right_hand_side(fe_values.get_quadrature_points(), rhs_values);
-
+       
 
         for (const unsigned int i : fe_values.dof_indices())
           {
@@ -507,9 +512,11 @@ class Translate: public Function<dim>
 
             for (const unsigned int q_point :
                  fe_values.quadrature_point_indices())
-              cell_rhs(i) += fe_values.shape_value(i, q_point) *
-                             rhs_values[q_point][component_i] *
-                             fe_values.JxW(q_point);
+                 {
+                  cell_rhs(i) += fe_values.shape_value(i, q_point) *
+                                    rhs_values[q_point][component_i] *
+                                    fe_values.JxW(q_point);
+                 }
           }
 
         // boundary conditions.
@@ -528,12 +535,18 @@ class Translate: public Function<dim>
                       const unsigned int component_i = fe.system_to_component_index(i).first;
                       Tensor<1,dim> G;
                       if (face->boundary_id() == 2 || face->boundary_id() == 4)
+                      {
+                        G[1] = 0;
                         G[0] = (-1*pi/lambda_scalar * std::cos(pi*x1) );
-                      if (face->boundary_id() == 1 || face->boundary_id() == 3)
-                        {
-                          G[0] = (pi * std::sin(pi*x2));
-                          G[1] = (-1*pi/lambda_scalar * std::cos(pi*x2));
-                        }
+                      } else {
+                        G[0] = (pi * std::sin(pi*x2));
+                        G[1] = (-1*pi/lambda_scalar * std::cos(pi*x2));
+                      }
+                      // if (face->boundary_id() == 1 || face->boundary_id() == 3)
+                      //   {
+                      //     G[0] = (pi * std::sin(pi*x2));
+                      //     G[1] = (-1*pi/lambda_scalar * std::cos(pi*x2));
+                      //   }
                       
                         cell_rhs(i) +=
                                 (fe_face_values.shape_value(i, q_point) * // phi_i(x_q)
@@ -720,6 +733,8 @@ class Translate: public Function<dim>
         // Set constrainted dof and rhs to zero.
         // constraints.set_zero(solution);
         // constraints.set_zero(system_rhs);
+        // constraints.condense(system_matrix);
+        // constraints.condense(system_rhs);
 
 
         // Traditional Solve.
@@ -769,7 +784,7 @@ class Translate: public Function<dim>
                                         cellwise_errors,
                                         VectorTools::L2_norm);
 
-    std::cout << "error: u_0: " << error_u << std::endl;
+    // std::cout << "error: u_0: " << error_u << std::endl;
 
     GridRefinement::refine_and_coarsen_fixed_number(triangulation,
                                                     cellwise_errors,
@@ -801,10 +816,10 @@ class Translate: public Function<dim>
     VectorTools::interpolate(dof_handler, 
                               ExactSolution<dim>(),
                               exact);
-    
-    Vector<double> Errors_;
-    Errors_.reinit(dof_handler.n_dofs());
-    Errors_ = exact - solution;
+
+    exact = nullspace.remove_nullspace(exact);
+    Vector<double> error_term = (exact - solution);
+    printf("error after projection is %f \n", error_term.l2_norm());
     
     data_out.add_data_vector(dof_handler,
                              exact,
@@ -812,9 +827,10 @@ class Translate: public Function<dim>
                               interpretation);
 
     data_out.add_data_vector(dof_handler,
-                              Errors_,
-                              "error",
+                              error_term, 
+                              "Error",
                               interpretation);
+
 
     data_out.build_patches();
 
@@ -826,7 +842,7 @@ class Translate: public Function<dim>
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 7; ++cycle)
+    for (unsigned int cycle = 0; cycle < 15; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
@@ -834,9 +850,10 @@ class Translate: public Function<dim>
           {
             GridGenerator::hyper_cube(triangulation, 0, 1);
             // Colorize will setup atuo.
-            triangulation.refine_global(2);
+            triangulation.refine_global();
             if (true)
             for (const auto &cell : triangulation.cell_iterators())
+            {
               for (const auto &face : cell->face_iterators())
                 {
                   // setup boundary id.
@@ -855,8 +872,37 @@ class Translate: public Function<dim>
                       // bottom boundary.
                       face->set_boundary_id(4); 
                     }
+                    
                   }
                 }
+
+              // for (const auto &face : cell->face_iterators()){
+              //   if (face->at_boundary()){
+              //     const auto center = face->center();
+              //       //Cornor point:
+              //       //Origin
+              //       if ((std::fabs(center(0) - (0.0)) < 1e-16 && 
+              //            std::fabs(center(1) - (0.0)) < 1e-16))
+              //            face->set_boundary_id(1);
+                    
+              //       //(1,0)
+              //       if ((std::fabs(center(0) - (1.0)) < 1e-16 && 
+              //            std::fabs(center(1) - (0.0)) < 1e-16))
+              //            face->set_boundary_id(1);
+
+              //       //(0,1)
+              //       if ((std::fabs(center(0) - (0.0)) < 1e-16 && 
+              //            std::fabs(center(1) - (1.0)) < 1e-16))
+              //            face->set_boundary_id(1);
+
+              //       //(1,1)
+              //       if ((std::fabs(center(0) - (1.0)) < 1e-16 && 
+              //            std::fabs(center(1) - (1.0)) < 1e-16))
+              //            face->set_boundary_id(1);
+
+              //   }
+              // }
+            }
 
           }
         else
