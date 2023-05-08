@@ -80,12 +80,12 @@ namespace Step8
   template <class VectorType>
   void Nullspace<VectorType>::orthogonalize(){
 
-    
-    for (unsigned int n = 0; n < basis.size(); ++n)
-      for (unsigned k = 0; k < n; ++k){
-        double tmp_jk = basis[n]*basis[k];
+    // basis.size() = n;
+    for (unsigned int j = 0; j < basis.size(); ++j)
+      for (unsigned k = 0; k < j; ++k){
+        double tmp_jk = basis[j]*basis[k];
         // printf("ortho between %d and %d is  %f \n",k, n, tmp_jk);
-        basis[k]  = basis[k] - tmp_jk * basis[n];
+        basis[j]  = basis[j] - tmp_jk * basis[k];
       }
     
   }
@@ -119,7 +119,7 @@ namespace Step8
           // Projection.
           for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
             {
-              double inner_product = nullspace.basis[i]*dest;
+              const double inner_product = nullspace.basis[i]*dest;
 	            dest.add( -1.0*inner_product, nullspace.basis[i]);
             }
       };
@@ -182,10 +182,10 @@ class Rot: public Function<dim>
     virtual void vector_value(const Point<dim> &p,
                               Vector<double> &  values) const override
                               {
-                                values[0] = -(p(1)-0.5) ;
-                                values[1] =  (p(0)-0.5) ;
-                                // values[0] = -(p(1));
-                                // values[1] =  (p(0));
+                                values(0) =  -(p(1)-0.5);
+                                values(1) =   (p(0)-0.5);
+                                // values[0] =  (p(1));
+                                // values[1] = -(p(0));
                               }
 };
 
@@ -309,7 +309,6 @@ class Translate: public Function<dim>
                                     /*keep_constrained_dofs = */ false);
 
     setup_nullspace();
-
     // interpolate_nullspace();
 
     sparsity_pattern.copy_from(dsp);
@@ -326,7 +325,7 @@ class Translate: public Function<dim>
 
     // For lambda = 10: (2)
     // const Point<dim, double> location_1(0.25,0.25);
-    // const Point<dim, double> location_2(0.25,0.75);
+    // const Point<dim, double> location_2(0.75,0.25);
 
     // Not very ideal, used to compare: (3)
     const Point<dim, double> location_1(0.0,0.0);
@@ -534,6 +533,8 @@ class Translate: public Function<dim>
                        
                       const unsigned int component_i = fe.system_to_component_index(i).first;
                       Tensor<1,dim> G;
+
+                      //Traditional.
                       if (face->boundary_id() == 2 || face->boundary_id() == 4)
                       {
                         G[1] = 0;
@@ -542,17 +543,11 @@ class Translate: public Function<dim>
                         G[0] = (pi * std::sin(pi*x2));
                         G[1] = (-1*pi/lambda_scalar * std::cos(pi*x2));
                       }
-                      // if (face->boundary_id() == 1 || face->boundary_id() == 3)
-                      //   {
-                      //     G[0] = (pi * std::sin(pi*x2));
-                      //     G[1] = (-1*pi/lambda_scalar * std::cos(pi*x2));
-                      //   }
                       
                         cell_rhs(i) +=
                                 (fe_face_values.shape_value(i, q_point) * // phi_i(x_q)
                                   G[component_i] *                                // 
                                   fe_face_values.JxW(q_point));           // dx
-                      
                         
                     }
                 }
@@ -668,7 +663,8 @@ class Translate: public Function<dim>
 
     VectorTools::interpolate(dof_handler, Translate<dim>(1), global_y_translation);
     global_y_translation /= global_y_translation.l2_norm();
-   }
+  }
+
 
   template <int dim>
   void ElasticProblem<dim>::print_mean_value(){
@@ -687,6 +683,7 @@ class Translate: public Function<dim>
     //                           exact);
 
     double mean_value = VectorTools::compute_mean_value(fe_values.get_mapping() , dof_handler, fe_values.get_quadrature(), solution, 0 );
+    
     printf("Mean Value of Solution is : %f \n", mean_value);
     
   }
@@ -704,17 +701,12 @@ class Translate: public Function<dim>
     // Defining Nullspace.
     nullspace.basis.clear();
 
-    // constraints.condense(global_rotation);
-    // constraints.condense(global_x_translation);
-    // constraints.condense(global_y_translation);
-
-    // Adding vector to basis.
+    // Adding vector to basis.    
     nullspace.basis.push_back(global_rotation);
     nullspace.basis.push_back(global_x_translation);
     nullspace.basis.push_back(global_y_translation);
 
     nullspace.orthogonalize();
-
 
     // Operator implementation.
     if (false){
@@ -722,11 +714,12 @@ class Translate: public Function<dim>
         // Solving with null space removal
         system_rhs = nullspace.remove_nullspace(system_rhs);
         // auto matrix_op = linear_operator(system_matrix);
-        auto matrix_op = my_operator(linear_operator(preconditioner), nullspace);
+        auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
         auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
         cg.solve(matrix_op, solution, system_rhs, prec_op);
 
-        print_mean_value();
+        // constraints.distribute(solution);
+        // print_mean_value();
     }
     else
     {
@@ -741,8 +734,8 @@ class Translate: public Function<dim>
         cg.solve(system_matrix, solution, system_rhs, preconditioner);
 
         // Post processing.
-        constraints.distribute(solution);
         solution = nullspace.remove_nullspace(solution);
+        constraints.distribute(solution);
         // print_mean_value();
     }
 
@@ -762,7 +755,11 @@ class Translate: public Function<dim>
         // printf("Checking if null space is orthogonal: \n");
         // printf("X and Y: %4f " , global_x_translation*global_y_translation);
         // printf("X and R: %4f " , global_x_translation*global_rotation);
-        // printf("R and Y: %4f " , global_rotation*global_y_translation);
+        // printf("R and Y: %4f " , global_rotation*global_y_translation);    
+        // constraints.condense(global_rotation);
+        // constraints.condense(global_x_translation);
+        // constraints.condense(global_y_translation);
+
   }
 
 
@@ -784,7 +781,7 @@ class Translate: public Function<dim>
                                         cellwise_errors,
                                         VectorTools::L2_norm);
 
-    // std::cout << "error: u_0: " << error_u << std::endl;
+    std::cout << "error: u_0: " << error_u << std::endl;
 
     GridRefinement::refine_and_coarsen_fixed_number(triangulation,
                                                     cellwise_errors,
@@ -818,18 +815,22 @@ class Translate: public Function<dim>
                               exact);
 
     exact = nullspace.remove_nullspace(exact);
-    Vector<double> error_term = (exact - solution);
-    printf("error after projection is %f \n", error_term.l2_norm());
-    
+    // exact.print(std::cout);
+
     data_out.add_data_vector(dof_handler,
                              exact,
                               "exact",
                               interpretation);
 
+    Vector<double> error_term = exact - solution;
+    printf("error after projection is %f \n", error_term.l2_norm());
+    // error_term.print(std::cout);
+
     data_out.add_data_vector(dof_handler,
                               error_term, 
                               "Error",
                               interpretation);
+
 
 
     data_out.build_patches();
@@ -842,7 +843,7 @@ class Translate: public Function<dim>
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 15; ++cycle)
+    for (unsigned int cycle = 0; cycle < 7; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
@@ -850,7 +851,7 @@ class Translate: public Function<dim>
           {
             GridGenerator::hyper_cube(triangulation, 0, 1);
             // Colorize will setup atuo.
-            triangulation.refine_global();
+            triangulation.refine_global(2);
             if (true)
             for (const auto &cell : triangulation.cell_iterators())
             {

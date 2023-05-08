@@ -58,6 +58,7 @@
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/lac/linear_operator_tools.h>
 #include <deal.II/lac/dynamic_sparsity_pattern.h>
+#include <deal.II/grid/grid_refinement.h>
 
 #include <algorithm>
 #include <deal.II/numerics/vector_tools_common.h>
@@ -171,6 +172,7 @@ namespace Step11
     void interpolate_nullspace();
     void construct_neumann_boundary();
     void solve();
+    
     void write_high_order_mesh(const unsigned cycle);
 
     Triangulation<dim> triangulation;
@@ -215,8 +217,8 @@ namespace Step11
     interpolate_nullspace();
 
     mean_value_constraints.clear();  
-    // mean_value_constraints.add_line(0);
-    mean_value_constraints.add_line(dof_handler.n_dofs()-1);
+    DoFTools::make_hanging_node_constraints(dof_handler, mean_value_constraints);
+    mean_value_constraints.add_line(0);
     // for (unsigned int i = 1; i < dof_handler.n_dofs(); ++i)
     //   mean_value_constraints.add_entry(0, i, -1 * global_constraint[i]);
     mean_value_constraints.close();
@@ -254,10 +256,10 @@ namespace Step11
 
 
     cell->get_dof_indices(local_dof_indices);
-    const unsigned int dofs_per_cell = fe_values.dofs_per_cell;
-    for (unsigned int i = 0; i < dofs_per_cell; ++i)
-      global_constraint(local_dof_indices[i]) += local_constraint(i);
-
+    // const unsigned int dofs_per_cell = fe_values.dofs_per_cell;
+    // for (unsigned int i = 0; i < dofs_per_cell; ++i)
+    //   global_constraint(local_dof_indices[i]) += local_constraint(i);
+    mean_value_constraints.distribute_local_to_global(local_constraint, local_dof_indices, global_constraint);
     }
   }
 
@@ -300,7 +302,7 @@ namespace Step11
 
       // rhs_func.value_list(fe_values.get_quadrature_points(), rhs_value);
 
-      if (false)
+      if (true)
       for (unsigned int q_point : fe_values.quadrature_point_indices())
       {
         for (unsigned int i : fe_values.dof_indices())
@@ -315,7 +317,7 @@ namespace Step11
 
           double x = fe_values.quadrature_point(q_point)[0];
           double y = fe_values.quadrature_point(q_point)[1];
-          double F_val = std::sin(numbers::PI * x) * std::cos(numbers::PI * y);
+          double F_val = 2 * numbers::PI * numbers::PI * std::sin(numbers::PI * x) * std::cos(numbers::PI * y);
           cell_rhs(i) += (fe_values.shape_value(i, q_point) * // phi_i(x_q)
                             F_val *                     // f(x_q)      
                             fe_values.JxW(q_point));              // dx
@@ -370,22 +372,24 @@ namespace Step11
                  std::ceil(1. * (mapping.get_degree() + 1) / 2)),
                2U);
 
-    MatrixTools::create_laplace_matrix(mapping,
-                                       dof_handler,
-                                       QGauss<dim>(gauss_degree),
-                                       system_matrix);
+    // MatrixTools::create_laplace_matrix(mapping,
+    //                                    dof_handler,
+    //                                    QGauss<dim>(gauss_degree),
+    //                                    system_matrix);
 
     
-    VectorTools::create_right_hand_side(mapping,
-                                        dof_handler,
-                                        QGauss<dim>(gauss_degree),
-                                        RightHandSide<dim>(),
-                                        system_rhs);
+    // VectorTools::create_right_hand_side(mapping,
+    //                                     dof_handler,
+    //                                     QGauss<dim>(gauss_degree),
+    //                                     RightHandSide<dim>(),
+    //                                     system_rhs);
 
 
     construct_neumann_boundary();
     
     solve();
+
+
 
     Vector<double> cellwise_error(triangulation.n_active_cells());
     QGauss<dim> quadrature(gauss_degree);
@@ -401,13 +405,30 @@ namespace Step11
                                         cellwise_error,
                                         VectorTools::L2_norm);
 
+      printf("Global error is %f \n", norm);
 
-    double mean_value = VectorTools::compute_mean_value(mapping, dof_handler, QGauss<dim>(gauss_degree),solution, 0);
 
-    output_table.add_value("cells", triangulation.n_active_cells());
-    output_table.add_value("error", norm);
-    output_table.add_value("MeanValue", mean_value);
-    // std::cout << std::endl;
+      GridRefinement::refine_and_coarsen_fixed_number(triangulation,
+                                                    cellwise_error,
+                                                    0.3,
+                                                    0.03);
+
+    if (true){
+      triangulation.execute_coarsening_and_refinement();
+    } else { 
+      triangulation.refine_global();
+    }
+
+    // double mean_value = 1.0;
+    // double mean_value = VectorTools::compute_mean_value(mapping, dof_handler, QGauss<dim>(gauss_degree),solution, 0);
+    // printf("Mean value is %f\n", mean_value);
+
+    // output_table.add_value("cells", triangulation.n_active_cells());
+    // output_table.add_value("error", norm);
+    // output_table.add_value("MeanValue", mean_value);
+    // printf("after table \n");
+
+
   }
 
   template <int dim>
@@ -434,8 +455,8 @@ namespace Step11
       nullspace.basis.push_back(global_constraint);
 
       // original matrix, but projector after preconditioner
-      // auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
-      auto matrix_op = linear_operator(system_matrix);
+      auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
+      // auto matrix_op = linear_operator(system_matrix);
       auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
       // remove nullspace from RHS
@@ -443,6 +464,7 @@ namespace Step11
       system_rhs.add(-1.0*r, global_constraint);
       // std::cout << "r=" << r << std::endl;
       solver.solve(matrix_op, solution, system_rhs, prec_op);
+      // mean_value_constraints.distribute(solution);
 
       // double solution_inner = solution * global_constraint;
       // solution.add(-1 * solution_inner, global_constraint);
@@ -457,13 +479,15 @@ namespace Step11
       // double rhs_inner = system_rhs * global_constraint;
       // solution.add(-1 * rhs_inner, global_constraint);
 
-      mean_value_constraints.condense(system_matrix);
-      mean_value_constraints.condense(system_rhs);
+      // mean_value_constraints.condense(system_matrix);
+      // mean_value_constraints.condense(system_rhs);
       solver.solve(system_matrix, solution, system_rhs, preconditioner);
+      
+      double solution_inner = solution * global_constraint;
+      solution.add(-1 * solution_inner, global_constraint);
+
       mean_value_constraints.distribute(solution);
 
-      // double solution_inner = solution * global_constraint;
-      // solution.add(-1 * solution_inner, global_constraint);
     }
     
   }
@@ -473,9 +497,9 @@ namespace Step11
   {
     DataOut<dim> data_out;
   
-    DataOutBase::VtkFlags flags;
-    flags.write_higher_order_cells = true;
-    data_out.set_flags(flags);
+    // DataOutBase::VtkFlags flags;
+    // flags.write_higher_order_cells = true;
+    // data_out.set_flags(flags);
   
     data_out.attach_dof_handler(dof_handler);
     data_out.add_data_vector(solution, "solution");
@@ -530,14 +554,13 @@ namespace Step11
       {
         setup_system();
         assemble_and_solve();
-        write_high_order_mesh(cycle);
+        // write_high_order_mesh(cycle);
 
-        triangulation.refine_global();
       }
 
-    output_table.set_precision("error", 6);
-    output_table.set_precision("MeanValue", 6);
-    output_table.write_text(std::cout);
+    // output_table.set_precision("error", 6);
+    // output_table.set_precision("MeanValue", 6);
+    // output_table.write_text(std::cout);
     // std::cout << std::endl;
   }
 } 
@@ -548,7 +571,7 @@ int main()
 {
   try
     {
-      dealii::deallog.depth_console(99);
+      // dealii::deallog.depth_console(99);
       std::cout.precision(5);
 
       for (unsigned int mapping_degree = 1; mapping_degree <= 1;
