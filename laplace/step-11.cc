@@ -217,14 +217,21 @@ namespace Step11
     interpolate_nullspace();
 
     mean_value_constraints.clear();  
-    DoFTools::make_hanging_node_constraints(dof_handler, mean_value_constraints);
+    // DoFTools::make_hanging_node_constraints(dof_handler, mean_value_constraints);
     mean_value_constraints.add_line(0);
     // for (unsigned int i = 1; i < dof_handler.n_dofs(); ++i)
     //   mean_value_constraints.add_entry(0, i, -1 * global_constraint[i]);
     mean_value_constraints.close();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
-    DoFTools::make_sparsity_pattern(dof_handler, dsp);
+
+    DoFTools::make_sparsity_pattern(dof_handler, 
+                                    dsp, 
+                                    mean_value_constraints, 
+                                    /*keep_constrained_dofs = */ false);
+
+    // DoFTools::make_sparsity_pattern(dof_handler, dsp);
+
     mean_value_constraints.condense(dsp);
 
     sparsity_pattern.copy_from(dsp);
@@ -288,9 +295,6 @@ namespace Step11
     // const unsigned int n_q_point(quadrature_formula.size());
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
 
-
-    RightHandSide<dim> rhs_func;
-    // std::vector<double> rhs_value(n_q_point);
     FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
     Vector<double> cell_rhs(dofs_per_cell);
 
@@ -325,7 +329,7 @@ namespace Step11
       }
 
       // Evaluating boundary values.
-      if(true)
+      // if(true)
       for (const auto &face : cell->face_iterators())
       {
           if ( face->at_boundary() )
@@ -339,15 +343,15 @@ namespace Step11
                       double x1 = fe_face_values.quadrature_point(q_point)[0];
                       double x2 = fe_face_values.quadrature_point(q_point)[1];
                        
-                      double G;
+                      double G = 0;
 
                       if (face->boundary_id() == 1){
                         G = numbers::PI * std::cos(numbers::PI * x1) * std::cos(numbers::PI * x2);
-                      } else if (face-> boundary_id() == 2){
+                      } else if (face->boundary_id() == 2){
                         G = numbers::PI * std::sin(numbers::PI * x1) * std::sin(numbers::PI * x2);
-                      } else if (face-> boundary_id() == 3){
+                      } else if (face->boundary_id() == 3){
                         G = -1 * numbers::PI * std::cos(numbers::PI * x1) * std::cos(numbers::PI * x2);
-                      } else if (face-> boundary_id() == 4){
+                      } else if (face->boundary_id() == 4){
                         G = -1 * numbers::PI * std::sin(numbers::PI * x1) * std::sin(numbers::PI * x2);
                       }
 
@@ -390,6 +394,13 @@ namespace Step11
     solve();
 
 
+    double mean_value = VectorTools::compute_mean_value(mapping, 
+                                                        dof_handler, 
+                                                        QGauss<dim>(gauss_degree),
+                                                        solution, 
+                                                        0);
+
+
 
     Vector<double> cellwise_error(triangulation.n_active_cells());
     QGauss<dim> quadrature(gauss_degree);
@@ -413,19 +424,9 @@ namespace Step11
                                                     0.3,
                                                     0.03);
 
-    if (true){
-      triangulation.execute_coarsening_and_refinement();
-    } else { 
-      triangulation.refine_global();
-    }
-
-    // double mean_value = 1.0;
-    // double mean_value = VectorTools::compute_mean_value(mapping, dof_handler, QGauss<dim>(gauss_degree),solution, 0);
-    // printf("Mean value is %f\n", mean_value);
-
-    // output_table.add_value("cells", triangulation.n_active_cells());
-    // output_table.add_value("error", norm);
-    // output_table.add_value("MeanValue", mean_value);
+    output_table.add_value("cells", triangulation.n_active_cells());
+    output_table.add_value("error", norm);
+    output_table.add_value("MeanValue", mean_value);
     // printf("after table \n");
 
 
@@ -479,14 +480,15 @@ namespace Step11
       // double rhs_inner = system_rhs * global_constraint;
       // solution.add(-1 * rhs_inner, global_constraint);
 
-      // mean_value_constraints.condense(system_matrix);
-      // mean_value_constraints.condense(system_rhs);
+      mean_value_constraints.condense(system_matrix);
+      mean_value_constraints.condense(system_rhs);
       solver.solve(system_matrix, solution, system_rhs, preconditioner);
       
       double solution_inner = solution * global_constraint;
       solution.add(-1 * solution_inner, global_constraint);
 
       mean_value_constraints.distribute(solution);
+      
 
     }
     
@@ -497,20 +499,19 @@ namespace Step11
   {
     DataOut<dim> data_out;
   
-    // DataOutBase::VtkFlags flags;
-    // flags.write_higher_order_cells = true;
-    // data_out.set_flags(flags);
+    DataOutBase::VtkFlags flags;
+    flags.write_higher_order_cells = true;
+    data_out.set_flags(flags);
   
     data_out.attach_dof_handler(dof_handler);
-    data_out.add_data_vector(solution, "solution");
+    data_out.add_data_vector(dof_handler, solution, "solution");
 
-    Vector<double> exact(dof_handler.n_dofs());
+    // Vector<double> exact(dof_handler.n_dofs());
+    Vector<double> exact;
+    exact.reinit(dof_handler.n_dofs());
     exact = 0;
     VectorTools::interpolate(dof_handler, Solution<dim>(), exact);
-    // exact.print(std::cout);
 
-    data_out.add_data_vector(exact, "ExactSolution");
-  
     data_out.build_patches(mapping,
                           mapping.get_degree(),
                           DataOut<dim>::curved_inner_cells);
@@ -554,13 +555,19 @@ namespace Step11
       {
         setup_system();
         assemble_and_solve();
-        // write_high_order_mesh(cycle);
+        write_high_order_mesh(cycle);
+
+        if (true){
+          triangulation.execute_coarsening_and_refinement();
+        } else { 
+          triangulation.refine_global();
+        }
 
       }
 
-    // output_table.set_precision("error", 6);
-    // output_table.set_precision("MeanValue", 6);
-    // output_table.write_text(std::cout);
+    output_table.set_precision("error", 6);
+    output_table.set_precision("MeanValue", 6);
+    output_table.write_text(std::cout);
     // std::cout << std::endl;
   }
 } 
