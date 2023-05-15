@@ -214,14 +214,15 @@ namespace Step11
     system_rhs.reinit(dof_handler.n_dofs());
     global_constraint.reinit(dof_handler.n_dofs());
 
-    interpolate_nullspace();
 
     mean_value_constraints.clear();  
-    // DoFTools::make_hanging_node_constraints(dof_handler, mean_value_constraints);
+    DoFTools::make_hanging_node_constraints(dof_handler, mean_value_constraints);
     mean_value_constraints.add_line(0);
     // for (unsigned int i = 1; i < dof_handler.n_dofs(); ++i)
     //   mean_value_constraints.add_entry(0, i, -1 * global_constraint[i]);
     mean_value_constraints.close();
+
+    interpolate_nullspace();
 
     DynamicSparsityPattern dsp(dof_handler.n_dofs(), dof_handler.n_dofs());
 
@@ -246,6 +247,9 @@ namespace Step11
                  std::ceil(1. * (mapping.get_degree() + 1) / 2)),
                2U);
 
+    AffineConstraints<double> constructing_constraint;
+    constructing_constraint.close();
+
     QGauss<dim> quadrature_formula(gauss_degree);
     std::vector<types::global_dof_index> local_dof_indices(fe.n_dofs_per_cell());
 
@@ -255,19 +259,19 @@ namespace Step11
     for (const auto &cell : dof_handler.active_cell_iterators()){
       local_constraint = 0;
       fe_values.reinit(cell);
-      for (unsigned int q_point = 0; q_point < fe_values.n_quadrature_points; ++q_point){
-        for (unsigned int i = 0; i < fe_values.dofs_per_cell; ++i){
+      for (unsigned int q_point = 0; q_point < fe_values.n_quadrature_points; ++q_point)
+        for (unsigned int i = 0; i < fe_values.dofs_per_cell; ++i)
           local_constraint(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
-        }
-      }
-
-
+        
+      
     cell->get_dof_indices(local_dof_indices);
     // const unsigned int dofs_per_cell = fe_values.dofs_per_cell;
     // for (unsigned int i = 0; i < dofs_per_cell; ++i)
     //   global_constraint(local_dof_indices[i]) += local_constraint(i);
-    mean_value_constraints.distribute_local_to_global(local_constraint, local_dof_indices, global_constraint);
+    constructing_constraint.distribute_local_to_global(local_constraint, local_dof_indices, global_constraint);
     }
+    // global_constraint /= global_constraint.l2_norm();
+    mean_value_constraints.distribute(global_constraint);
   }
 
 
@@ -306,7 +310,7 @@ namespace Step11
 
       // rhs_func.value_list(fe_values.get_quadrature_points(), rhs_value);
 
-      if (true)
+      // if (true)
       for (unsigned int q_point : fe_values.quadrature_point_indices())
       {
         for (unsigned int i : fe_values.dof_indices())
@@ -376,23 +380,9 @@ namespace Step11
                  std::ceil(1. * (mapping.get_degree() + 1) / 2)),
                2U);
 
-    // MatrixTools::create_laplace_matrix(mapping,
-    //                                    dof_handler,
-    //                                    QGauss<dim>(gauss_degree),
-    //                                    system_matrix);
-
-    
-    // VectorTools::create_right_hand_side(mapping,
-    //                                     dof_handler,
-    //                                     QGauss<dim>(gauss_degree),
-    //                                     RightHandSide<dim>(),
-    //                                     system_rhs);
-
-
     construct_neumann_boundary();
     
     solve();
-
 
     double mean_value = VectorTools::compute_mean_value(mapping, 
                                                         dof_handler, 
@@ -416,7 +406,7 @@ namespace Step11
                                         cellwise_error,
                                         VectorTools::L2_norm);
 
-      printf("Global error is %f \n", norm);
+      // printf("Global error is %f \n", norm);
 
 
       GridRefinement::refine_and_coarsen_fixed_number(triangulation,
@@ -471,24 +461,14 @@ namespace Step11
       // solution.add(-1 * solution_inner, global_constraint);
     } else {
 
-      // Vector<double> global_constraint(dof_handler.n_dofs());
-      // for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
-      //   global_constraint(i) += 1; 
-      // }
-      // global_constraint /= global_constraint.l2_norm();
-      
-      // double rhs_inner = system_rhs * global_constraint;
-      // solution.add(-1 * rhs_inner, global_constraint);
-
-      mean_value_constraints.condense(system_matrix);
-      mean_value_constraints.condense(system_rhs);
       solver.solve(system_matrix, solution, system_rhs, preconditioner);
       
-      double solution_inner = solution * global_constraint;
-      solution.add(-1 * solution_inner, global_constraint);
-
       mean_value_constraints.distribute(solution);
-      
+      // global_constraint /= global_constraint.l2_norm();
+
+      double solution_inner = solution * global_constraint;
+
+      solution.add(-1 * solution_inner, global_constraint);
 
     }
     
@@ -555,7 +535,7 @@ namespace Step11
       {
         setup_system();
         assemble_and_solve();
-        write_high_order_mesh(cycle);
+        // write_high_order_mesh(cycle);
 
         if (true){
           triangulation.execute_coarsening_and_refinement();
@@ -578,7 +558,7 @@ int main()
 {
   try
     {
-      // dealii::deallog.depth_console(99);
+      dealii::deallog.depth_console(99);
       std::cout.precision(5);
 
       for (unsigned int mapping_degree = 1; mapping_degree <= 1;
