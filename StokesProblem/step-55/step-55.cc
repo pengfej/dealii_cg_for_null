@@ -62,6 +62,7 @@ namespace LA
 #include <deal.II/numerics/vector_tools.h>
 #include <deal.II/numerics/data_out.h>
 #include <deal.II/numerics/error_estimator.h>
+#include <deal.II/lac/linear_operator_tools.h>
 
 #include <deal.II/base/utilities.h>
 #include <deal.II/base/conditional_ostream.h>
@@ -82,6 +83,58 @@ namespace Step55
 
   // We need a few helper classes to represent our solver strategy
   // described in the introduction.
+
+  template <class VectorType>
+  struct Nullspace
+  {
+    std::vector<VectorType> basis;
+  };
+
+
+  
+  template <typename Range, typename Domain, typename Payload, class VectorType>
+  LinearOperator<Range, Domain, Payload>
+  my_operator(const LinearOperator<Range, Domain, Payload> &op,
+				                         Nullspace<VectorType> &nullspace)
+  {
+      LinearOperator<Range, Domain, Payload> return_op;
+
+      return_op.reinit_range_vector  = op.reinit_range_vector;
+      return_op.reinit_domain_vector = op.reinit_domain_vector;
+
+      return_op.vmult = [&](Range &dest, const Domain &src) {
+          op.vmult(dest, src);   // dest = Phi(src)
+
+          // Projection.
+          for (unsigned int i = 0; i < nullspace.basis.size(); ++i)
+            {
+              double inner_product = nullspace.basis[i]*dest;
+      	      dest.add( -1.0*inner_product, nullspace.basis[i]);
+              // printf("One iteration done! \n");
+            }
+      };
+
+      return_op.vmult_add = [&](Range &dest, const Domain &src) {
+          std::cout << "before vmult_add" << std::endl;
+          op.vmult_add(dest, src);  // dest += Phi(src)
+          std::cout << "after vmult_add" << std::endl;
+      };
+
+      return_op.Tvmult = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult" << std::endl;
+          op.Tvmult(dest, src);
+          std::cout << "after Tvmult" << std::endl;
+      };
+
+      return_op.Tvmult_add = [&](Domain &dest, const Range &src) {
+          std::cout << "before Tvmult_add" << std::endl;
+          op.Tvmult_add(dest, src);
+          std::cout << "after Tvmult_add" << std::endl;
+      };
+
+      return return_op;
+  }
+
 
   namespace LinearSolvers
   {
@@ -139,12 +192,13 @@ namespace Step55
 
     // The class A template class for a simple block diagonal preconditioner
     // for 2x2 matrices.
-    template <class PreconditionerA, class PreconditionerS>
+    template <class PreconditionerA, class PreconditionerS, typename VectorType>
     class BlockDiagonalPreconditioner : public Subscriptor
     {
     public:
       BlockDiagonalPreconditioner(const PreconditionerA &preconditioner_A,
-                                  const PreconditionerS &preconditioner_S);
+                                  const PreconditionerS &preconditioner_S,
+                                  const Nullspace<VectorType> &nullspace);
 
       void vmult(LA::MPI::BlockVector &      dst,
                  const LA::MPI::BlockVector &src) const;
@@ -152,24 +206,31 @@ namespace Step55
     private:
       const PreconditionerA &preconditioner_A;
       const PreconditionerS &preconditioner_S;
+      const Nullspace<VectorType> &null_space;
     };
 
-    template <class PreconditionerA, class PreconditionerS>
-    BlockDiagonalPreconditioner<PreconditionerA, PreconditionerS>::
+    template <class PreconditionerA, class PreconditionerS, typename VectorType>
+    BlockDiagonalPreconditioner<PreconditionerA, PreconditionerS, VectorType>::
       BlockDiagonalPreconditioner(const PreconditionerA &preconditioner_A,
-                                  const PreconditionerS &preconditioner_S)
+                                  const PreconditionerS &preconditioner_S,
+                                  const Nullspace<VectorType> &nullspace)
       : preconditioner_A(preconditioner_A)
       , preconditioner_S(preconditioner_S)
+      , null_space(nullspace)
     {}
 
 
-    template <class PreconditionerA, class PreconditionerS>
-    void BlockDiagonalPreconditioner<PreconditionerA, PreconditionerS>::vmult(
+    template <class PreconditionerA, class PreconditionerS, typename VectorType>
+    void BlockDiagonalPreconditioner<PreconditionerA, PreconditionerS, VectorType>::vmult(
       LA::MPI::BlockVector &      dst,
       const LA::MPI::BlockVector &src) const
     {
       preconditioner_A.vmult(dst.block(0), src.block(0));
       preconditioner_S.vmult(dst.block(1), src.block(1));
+
+      //projection
+      double inner_projection = dst.block(1) * null_space.basis[0].block(1);
+      dst.block(1).add(-1*inner_projection, null_space.basis[0].block(1));
     }
 
   } // namespace LinearSolvers
@@ -306,6 +367,7 @@ namespace Step55
     LA::MPI::BlockSparseMatrix preconditioner_matrix;
     LA::MPI::BlockVector       locally_relevant_solution;
     LA::MPI::BlockVector       system_rhs;
+    LA::MPI::BlockVector       nullspace_vector;
 
     ConditionalOStream pcout;
     TimerOutput        computing_timer;
@@ -469,6 +531,7 @@ namespace Step55
                                      relevant_partitioning,
                                      mpi_communicator);
     system_rhs.reinit(owned_partitioning, mpi_communicator);
+    nullspace_vector.reinit(owned_partitioning, mpi_communicator);
   }
 
 
@@ -485,6 +548,7 @@ namespace Step55
     system_matrix         = 0;
     preconditioner_matrix = 0;
     system_rhs            = 0;
+    nullspace_vector      = 0;
 
     const QGauss<dim> quadrature_formula(velocity_degree + 1);
 
@@ -499,6 +563,7 @@ namespace Step55
     FullMatrix<double> cell_matrix(dofs_per_cell, dofs_per_cell);
     FullMatrix<double> cell_matrix2(dofs_per_cell, dofs_per_cell);
     Vector<double>     cell_rhs(dofs_per_cell);
+    Vector<double>     local_null_vector(dofs_per_cell);
 
     const RightHandSide<dim>    right_hand_side;
     std::vector<Vector<double>> rhs_values(n_q_points, Vector<double>(dim + 1));
@@ -517,6 +582,7 @@ namespace Step55
           cell_matrix  = 0;
           cell_matrix2 = 0;
           cell_rhs     = 0;
+          local_null_vector = 0;
 
           fe_values.reinit(cell);
           right_hand_side.vector_value_list(fe_values.get_quadrature_points(),
@@ -528,6 +594,7 @@ namespace Step55
                   grad_phi_u[k] = fe_values[velocities].gradient(k, q);
                   div_phi_u[k]  = fe_values[velocities].divergence(k, q);
                   phi_p[k]      = fe_values[pressure].value(k, q);
+                  local_null_vector[k] += fe_values[pressure].value(k,q) * fe_values.JxW(q);
                 }
 
               for (unsigned int i = 0; i < dofs_per_cell; ++i)
@@ -559,6 +626,10 @@ namespace Step55
                                                  system_matrix,
                                                  system_rhs);
 
+          constraints.distribute_local_to_global(local_null_vector,
+                                                  local_dof_indices,
+                                                  nullspace_vector);
+
           constraints.distribute_local_to_global(cell_matrix2,
                                                  local_dof_indices,
                                                  preconditioner_matrix);
@@ -567,6 +638,7 @@ namespace Step55
     system_matrix.compress(VectorOperation::add);
     preconditioner_matrix.compress(VectorOperation::add);
     system_rhs.compress(VectorOperation::add);
+    nullspace_vector.compress(VectorOperation::add);
   }
 
 
@@ -607,11 +679,20 @@ namespace Step55
                                                       LA::MPI::PreconditionAMG>;
     const mp_inverse_t mp_inverse(preconditioner_matrix.block(1, 1), prec_S);
 
+
+    Nullspace<LA::MPI::BlockVector> null_int_u;
+    nullspace_vector /= nullspace_vector.l2_norm();
+    null_int_u.basis.push_back(nullspace_vector);
+
+    const double rhs_dot_product = system_rhs * nullspace_vector;
+    system_rhs.add(-1 * rhs_dot_product, nullspace_vector);
+
     // This constructs the block preconditioner based on the preconditioners
     // for the individual blocks defined above.
     const LinearSolvers::BlockDiagonalPreconditioner<LA::MPI::PreconditionAMG,
-                                                     mp_inverse_t>
-      preconditioner(prec_A, mp_inverse);
+                                                     mp_inverse_t,
+                                                     LA::MPI::BlockVector>
+      preconditioner(prec_A, mp_inverse, null_int_u);
 
     // With that, we can finally set up the linear solver and solve the system:
     SolverControl solver_control(system_matrix.m(),
@@ -623,7 +704,7 @@ namespace Step55
                                               mpi_communicator);
 
     constraints.set_zero(distributed_solution);
-
+    
     solver.solve(system_matrix,
                  distributed_solution,
                  system_rhs,
@@ -638,12 +719,12 @@ namespace Step55
     // computations against our reference solution, which has a mean value
     // of zero.
     locally_relevant_solution = distributed_solution;
-    const double mean_pressure =
-      VectorTools::compute_mean_value(dof_handler,
-                                      QGauss<dim>(velocity_degree + 2),
-                                      locally_relevant_solution,
-                                      dim);
-    distributed_solution.block(1).add(-mean_pressure);
+    // const double mean_pressure =
+    //   VectorTools::compute_mean_value(dof_handler,
+    //                                   QGauss<dim>(velocity_degree + 2),
+    //                                   locally_relevant_solution,
+    //                                   dim);
+    // distributed_solution.block(1).add(-mean_pressure);
     locally_relevant_solution.block(1) = distributed_solution.block(1);
   }
 
@@ -777,7 +858,7 @@ namespace Step55
         if (Utilities::MPI::n_mpi_processes(mpi_communicator) <= 32)
           {
             TimerOutput::Scope t(computing_timer, "output");
-            output_results(cycle);
+            // output_results(cycle);
           }
 
         computing_timer.print_summary();
