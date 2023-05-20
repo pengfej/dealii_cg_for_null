@@ -652,6 +652,15 @@ namespace Step55
   template <int dim>
   void StokesProblem<dim>::solve()
   {
+    Nullspace<LA::MPI::BlockVector> null_int_u;
+    // nullspace_vector.reinit(system_rhs);
+    // nullspace_vector.block(1).add(1.0);
+    nullspace_vector /= nullspace_vector.l2_norm();
+    null_int_u.basis.push_back(nullspace_vector);
+
+    const double rhs_dot_product = system_rhs * nullspace_vector;
+    system_rhs.add(-1 * rhs_dot_product, nullspace_vector);
+
     TimerOutput::Scope t(computing_timer, "solve");
 
     LA::MPI::PreconditionAMG prec_A;
@@ -679,14 +688,6 @@ namespace Step55
                                                       LA::MPI::PreconditionAMG>;
     const mp_inverse_t mp_inverse(preconditioner_matrix.block(1, 1), prec_S);
 
-
-    Nullspace<LA::MPI::BlockVector> null_int_u;
-    nullspace_vector /= nullspace_vector.l2_norm();
-    null_int_u.basis.push_back(nullspace_vector);
-
-    const double rhs_dot_product = system_rhs * nullspace_vector;
-    system_rhs.add(-1 * rhs_dot_product, nullspace_vector);
-
     // This constructs the block preconditioner based on the preconditioners
     // for the individual blocks defined above.
     const LinearSolvers::BlockDiagonalPreconditioner<LA::MPI::PreconditionAMG,
@@ -698,7 +699,7 @@ namespace Step55
     SolverControl solver_control(system_matrix.m(),
                                  1e-10 * system_rhs.l2_norm());
 
-    SolverMinRes<LA::MPI::BlockVector> solver(solver_control);
+    SolverGMRES<LA::MPI::BlockVector> solver(solver_control);
 
     LA::MPI::BlockVector distributed_solution(owned_partitioning,
                                               mpi_communicator);
@@ -840,7 +841,7 @@ namespace Step55
 #else
     pcout << "Running using Trilinos." << std::endl;
 #endif
-    const unsigned int n_cycles = 5;
+    const unsigned int n_cycles = 6;
     for (unsigned int cycle = 0; cycle < n_cycles; ++cycle)
       {
         pcout << "Cycle " << cycle << ':' << std::endl;

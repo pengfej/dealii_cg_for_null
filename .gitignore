@@ -15,13 +15,14 @@ StokesProblem/step-55/step-55
 StokesProblem/step-55/solution*
 StokesProblem/step-55/output*
 
-StokesProblem/step-56/CMakeFiles/
-StokesProblem/step-56/cmake*
-StokesProblem/step-56/CMakeCache*
-StokesProblem/step-56/Make*
-StokesProblem/step-56/step-56
-StokesProblem/step-56/solution*
-StokesProblem/step-56/output*
+StokesProblem/step-55_original/CMakeFiles/
+StokesProblem/step-55_original/cmake*
+StokesProblem/step-55_original/CMakeCache*
+StokesProblem/step-55_original/Make*
+StokesProblem/step-55_original/step-56
+StokesProblem/step-55_original/solution*
+StokesProblem/step-55_original/output*
+StokesProblem/step-55_original/.cache*
 
 laplace/
 step-8/
