@@ -437,17 +437,17 @@ namespace Step11
       // Defining Nullspace.  
       Nullspace<VectorType> nullspace;
 
-      // Vector<double> global_constraint(dof_handler.n_dofs());
-      // for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
-      //   global_constraint(i) += 1; 
-      // }
+      Vector<double> global_constraint(dof_handler.n_dofs());
+      for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
+        global_constraint(i) += 1; 
+      }
 
       global_constraint /= global_constraint.l2_norm();
       nullspace.basis.push_back(global_constraint);
 
       // original matrix, but projector after preconditioner
-      auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
-      // auto matrix_op = linear_operator(system_matrix);
+      // auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
+      auto matrix_op = linear_operator(system_matrix);
       auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
       // remove nullspace from RHS
@@ -460,6 +460,14 @@ namespace Step11
       // double solution_inner = solution * global_constraint;
       // solution.add(-1 * solution_inner, global_constraint);
     } else {
+      
+      Vector<double> global_constraint(dof_handler.n_dofs());
+      for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
+        global_constraint(i) += 1; 
+      }
+
+      global_constraint /= global_constraint.l2_norm();
+      
 
       solver.solve(system_matrix, solution, system_rhs, preconditioner);
       
@@ -537,7 +545,7 @@ namespace Step11
         assemble_and_solve();
         // write_high_order_mesh(cycle);
 
-        if (true){
+        if (false){
           triangulation.execute_coarsening_and_refinement();
         } else { 
           triangulation.refine_global();

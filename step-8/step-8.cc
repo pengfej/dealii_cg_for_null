@@ -60,7 +60,7 @@
 namespace Step8
 {
   using namespace dealii;
-  const double lambda_scalar = 2.0;          
+  const double lambda_scalar = 10.0;          
   const double pi = numbers::PI;
   const double pi2 = numbers::PI * numbers::PI;
 
@@ -74,7 +74,7 @@ namespace Step8
     std::vector<VectorType> basis;
     
     void orthogonalize();
-    VectorType remove_nullspace(VectorType& rhs) const;
+    void remove_nullspace(VectorType& rhs) const;
 
   };
 
@@ -83,25 +83,24 @@ namespace Step8
 
     // basis.size() = n;
     for (unsigned int j = 0; j < basis.size(); ++j)
-      for (unsigned k = 0; k < j; ++k){
+    {
+      for (unsigned k = j+1; k < basis.size(); ++k)
+      {
         double tmp_jk = basis[j]*basis[k];
         // printf("ortho between %d and %d is  %f \n",k, n, tmp_jk);
-        basis[j]  = basis[j] - tmp_jk * basis[k];
+        basis[j].add(-1*tmp_jk, basis[k]);
       }
-    
+    } 
   }
 
   template<class VectorType>
-  VectorType Nullspace<VectorType>::remove_nullspace(VectorType& rhs) const {
-
-    for (unsigned int n = 0; n < basis.size(); ++n){
-      double tmp_rhs_inner_product = rhs * basis[n];
-      // printf("Removal %f \n", tmp_rhs_inner_product);
-      rhs.add(-1*tmp_rhs_inner_product, basis[n]);
+  void Nullspace<VectorType>::remove_nullspace(VectorType& input_vector) const{
+    for (unsigned int n = 0; n < basis.size(); ++n)
+    {
+      double tmp_rhs_inner_product = basis[n]*input_vector;
+      printf("Removal %f \n", tmp_rhs_inner_product);
+      input_vector.add(-1*tmp_rhs_inner_product, basis[n]);
     }
-
-    return rhs;
-
   }
 
   template <typename Range, typename Domain, typename Payload, class VectorType>
@@ -201,7 +200,7 @@ class Translate: public Function<dim>
     virtual void vector_value(const Point<dim> &p,
                               Vector<double> &  values) const override
                               {
-                                values = 0.0;
+                                // values = 0.0;
                                 values[component] = 1;//(p(component)-0.5);
                               }
 
@@ -229,10 +228,6 @@ class Translate: public Function<dim>
                                                 std::cos(pi*uy);
                               }
   };
-
-  // template <int dim>
-  // void ExactSolution<dim>::vector_value(const Point<dim> &p,
-  //                                      Vector<double> &  values) const
   
   template <int dim>
   class ElasticProblem
@@ -295,7 +290,7 @@ class Translate: public Function<dim>
     // Fixing three points or using exact boundary condition.
     if (true)
       {
-        // fixing_three_points();
+        fixing_three_points();
       }
       //std::cout << "Not fixing any points \n";
     else
@@ -313,8 +308,8 @@ class Translate: public Function<dim>
                                     constraints,
                                     /*keep_constrained_dofs = */ false);
 
-    // setup_nullspace();
-    interpolate_nullspace();
+    setup_nullspace();
+    // interpolate_nullspace();
 
     sparsity_pattern.copy_from(dsp);
     system_matrix.reinit(sparsity_pattern);
@@ -607,43 +602,25 @@ class Translate: public Function<dim>
 
                   if (component_i == 0)
                   {
-                    // cell_rotation(i) += -(fe_values.shape_grad(i,q_point)[1]);
                     local_x_translation(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
-                    // This will look like (number, 0, number, 0, ...)
-                    // If component_i == 0, then the form of basis function is (\phi_i, 0)
-                    // therefore, it's u_1 component. the second component of gradient of u_1 is d(u_1)/d(x_2)
                   }
-                  else 
+                  else if (component_i == 1)
                   {
-                    // cell_rotation(i-1) += fe_values.shape_grad(i,q_point)[0];
                     local_y_translation(i) += fe_values.shape_value(i, q_point) * fe_values.JxW(q_point);
-                    // This will look like (0, number, 0, number, ...)
-                    // If component_i == 1, then the form of basis function is (0, \phi_i)
-                    // therefore, it's u_2 component. the first component of gradient of u_2 is d(u_2)/d(x_1)
                   }
                 }
-
-            // for (unsigned int i = 0; i < dofs_per_cell-1; ++ i)
-            // {
-            //   cell_rotation(i) += grad_uy(i+1) - grad_ux(i);
-            // }
-           
           }
-
-        // cell_rotation.print(std::cout);
             
         cell->get_dof_indices(local_dof_indices);
 
         for (unsigned int i = 0; i < dofs_per_cell; ++ i)
         {
           global_rotation[local_dof_indices[i]] += cell_rotation[i];
-          // global_gradient[local_dof_indices[i]] += local_gradient[i];
           global_x_translation[local_dof_indices[i]] += local_x_translation[i];
           global_y_translation[local_dof_indices[i]] += local_y_translation[i];
         }
 
-        // cell->get_dof_indices(local_dof_indices);
-        // constraints.distribute_local_to_global( cell_rotation, local_dof_indices, global_rotation);
+        // constraints.distribute_local_to_global( cell_rotation,       local_dof_indices, global_rotation);
         // constraints.distribute_local_to_global( local_x_translation, local_dof_indices, global_x_translation);
         // constraints.distribute_local_to_global( local_y_translation, local_dof_indices, global_y_translation);
 
@@ -655,12 +632,12 @@ class Translate: public Function<dim>
       //     sum_quat += global_rotation(i);
       // }
       // printf("sum of rotation is %f \n", sum_quat);
+      // global_rotation.print(std::cout);
       
       global_rotation /= global_rotation.l2_norm();
       global_x_translation /= global_x_translation.l2_norm();
       global_y_translation /= global_y_translation.l2_norm();
 
-      // global_rotation.print(std::cout);
       
   }
 
@@ -673,6 +650,7 @@ class Translate: public Function<dim>
     global_y_translation.reinit(dof_handler.n_dofs());
 
     VectorTools::interpolate(dof_handler, Rot<dim>(), global_rotation);
+    // global_rotation.print(std::cout);
     global_rotation /= global_rotation.l2_norm();
 
     VectorTools::interpolate(dof_handler, Translate<dim>(0), global_x_translation);
@@ -720,18 +698,26 @@ class Translate: public Function<dim>
     // constraints.distribute(global_x_translation);
     // constraints.distribute(global_y_translation);
 
-    // Adding vector to basis.        
-    nullspace.basis.push_back(global_x_translation);
-    nullspace.basis.push_back(global_y_translation);
+    // Adding vector to basis.            
     nullspace.basis.push_back(global_rotation);
+    nullspace.basis.push_back(global_y_translation);
+    nullspace.basis.push_back(global_x_translation);
 
     nullspace.orthogonalize();
 
+    // printf("Global rotation \n");
+    // nullspace.basis[0].print(std::cout);
+    // printf("Global x \n");
+    // nullspace.basis[1].print(std::cout);
+    // printf("Global y \n");
+    // nullspace.basis[2].print(std::cout);
+    
+
     // Operator implementation.
-    if (true){
+    if (false){
         
         // Solving with null space removal
-        system_rhs = nullspace.remove_nullspace(system_rhs);
+        nullspace.remove_nullspace(system_rhs);
         auto matrix_op = linear_operator(system_matrix);
         // auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
         auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
@@ -749,7 +735,8 @@ class Translate: public Function<dim>
 
         // Post processing.
         constraints.distribute(solution);
-        solution = nullspace.remove_nullspace(solution);
+        // printf("Remove null space from solution: \n");
+        nullspace.remove_nullspace(solution);
         // print_mean_value();
     }
 
@@ -790,6 +777,11 @@ class Translate: public Function<dim>
                                       quadrature,
                                       VectorTools::L2_norm);
 
+    Vector<double> exact(dof_handler.n_dofs());
+    VectorTools::interpolate(dof_handler, 
+                              ExactSolution<dim>(),
+                              exact);
+
     error_u =
       VectorTools::compute_global_error(triangulation,
                                         cellwise_errors,
@@ -827,7 +819,8 @@ class Translate: public Function<dim>
                               ExactSolution<dim>(),
                               exact);
 
-    exact = nullspace.remove_nullspace(exact);
+    printf("Remove nullspace from exact. \n");
+    nullspace.remove_nullspace(exact);
     // exact.print(std::cout);
 
     data_out.add_data_vector(dof_handler,
@@ -856,7 +849,7 @@ class Translate: public Function<dim>
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 7; ++cycle)
+    for (unsigned int cycle = 0; cycle < 6; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
@@ -864,7 +857,7 @@ class Translate: public Function<dim>
           {
             GridGenerator::hyper_cube(triangulation, 0, 1);
             // Colorize will setup atuo.
-            triangulation.refine_global();
+            triangulation.refine_global(2);
             if (true)
             for (const auto &cell : triangulation.cell_iterators())
             {
@@ -890,32 +883,6 @@ class Translate: public Function<dim>
                   }
                 }
 
-              // for (const auto &face : cell->face_iterators()){
-              //   if (face->at_boundary()){
-              //     const auto center = face->center();
-              //       //Cornor point:
-              //       //Origin
-              //       if ((std::fabs(center(0) - (0.0)) < 1e-16 && 
-              //            std::fabs(center(1) - (0.0)) < 1e-16))
-              //            face->set_boundary_id(1);
-                    
-              //       //(1,0)
-              //       if ((std::fabs(center(0) - (1.0)) < 1e-16 && 
-              //            std::fabs(center(1) - (0.0)) < 1e-16))
-              //            face->set_boundary_id(1);
-
-              //       //(0,1)
-              //       if ((std::fabs(center(0) - (0.0)) < 1e-16 && 
-              //            std::fabs(center(1) - (1.0)) < 1e-16))
-              //            face->set_boundary_id(1);
-
-              //       //(1,1)
-              //       if ((std::fabs(center(0) - (1.0)) < 1e-16 && 
-              //            std::fabs(center(1) - (1.0)) < 1e-16))
-              //            face->set_boundary_id(1);
-
-              //   }
-              // }
             }
 
           }
