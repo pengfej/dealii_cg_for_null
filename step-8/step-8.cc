@@ -60,7 +60,7 @@
 namespace Step8
 {
   using namespace dealii;
-  const double lambda_scalar = 10.0;          
+  const double lambda_scalar = 2.0;          
   const double pi = numbers::PI;
   const double pi2 = numbers::PI * numbers::PI;
 
@@ -86,10 +86,12 @@ namespace Step8
     {
       for (unsigned k = j+1; k < basis.size(); ++k)
       {
-        double tmp_jk = basis[j]*basis[k];
-        // printf("ortho between %d and %d is  %f \n",k, n, tmp_jk);
+        const double tmp_jk = (basis[j]*basis[k])/(basis[k]*basis[k]);
+        // printf("ortho between %d and %d is  %f \n",j, k, tmp_jk);
         basis[j].add(-1*tmp_jk, basis[k]);
       }
+
+      basis[j] /= basis[j].l2_norm();
     } 
   }
 
@@ -97,7 +99,7 @@ namespace Step8
   void Nullspace<VectorType>::remove_nullspace(VectorType& input_vector) const{
     for (unsigned int n = 0; n < basis.size(); ++n)
     {
-      double tmp_rhs_inner_product = basis[n]*input_vector;
+      const double tmp_rhs_inner_product = (basis[n]*input_vector)/(basis[n]*basis[n]);
       printf("Removal %f \n", tmp_rhs_inner_product);
       input_vector.add(-1*tmp_rhs_inner_product, basis[n]);
     }
@@ -157,11 +159,11 @@ namespace Step8
       const double x1 = points[pt][0];
       const double x2 = points[pt][1];
 
-      values[pt][0] = -1*pi*pi*std::sin(pi*x1) * 
-                        std::sin(pi * x2)     +
-                        2*pi*pi*(1/lambda_scalar + 1)    * 
-                        std::cos(pi*x1)       * 
-                        std::sin(pi*x2);
+      values[pt][0] = -1*pi2*std::sin(pi*x1) * 
+                             std::sin(pi*x2) +
+                       2*pi2*(1/lambda_scalar + 1)* 
+                             std::cos(pi*x1)    * 
+                             std::sin(pi*x2);
 
       values[pt][1] = -1* pi*pi*std::cos(pi*x1) *
                         std::cos(pi * x2)     +
@@ -182,10 +184,10 @@ class Rot: public Function<dim>
     virtual void vector_value(const Point<dim> &p,
                               Vector<double> &  values) const override
                               {
-                                values(0) =  -(p(1)-0.5);
-                                values(1) =   (p(0)-0.5);
-                                // values[0] = -(p(1));
-                                // values[1] =  (p(0));
+                                // values(0) =  -(p(1)-0.5);
+                                // values(1) =   (p(0)-0.5);
+                                values[0] = -(p(1));
+                                values[1] =  (p(0));
                               }
 };
 
@@ -221,11 +223,13 @@ class Translate: public Function<dim>
                                 const double ux = p[0];
                                 const double uy = p[1];
 
-                                values[0] = (-1 * std::sin(pi * ux) + 1/lambda_scalar * std::cos(pi*ux)) *
-                                                    std::sin(pi*uy) + 4/pi2;
+                                values[0] = (-1 * std::sin(pi*ux) + 
+                                1/lambda_scalar * std::cos(pi*ux)) *
+                                                  std::sin(pi*uy) + 4/pi2;
 
-                                values[1] = (-1 * std::cos(pi * ux) + 1/lambda_scalar * std::sin(pi*ux)) *
-                                                std::cos(pi*uy);
+                                values[1] = (-1 * std::cos(pi * ux) + 
+                                1/lambda_scalar * std::sin(pi*ux)) *
+                                                  std::cos(pi*uy);
                               }
   };
   
@@ -290,7 +294,7 @@ class Translate: public Function<dim>
     // Fixing three points or using exact boundary condition.
     if (true)
       {
-        fixing_three_points();
+        // fixing_three_points();
       }
       //std::cout << "Not fixing any points \n";
     else
@@ -328,8 +332,9 @@ class Translate: public Function<dim>
     // const Point<dim, double> location_2(0.75,0.25);
 
     // Not very ideal, used to compare: (3)
-    const Point<dim, double> location_1(0.0,0.0);
-    const Point<dim, double> location_2(1.0,0.0);
+    const Point<dim, double> location_1(0.0,0.0); // fix x
+    const Point<dim, double> location_2(1.0,0.0); // fix y
+    // const Point<dim, double> location_3(1.0,1.0); // fix y
 
     // definitely gonna be there. (4)
     // const Point<dim, double> location_1(0.0,0.0);
@@ -573,9 +578,6 @@ class Translate: public Function<dim>
     global_y_translation.reinit(dof_handler.n_dofs());
 
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
-    // std::vector<Tensor<2, dim, double>> global_gradient(dof_handler.n_dofs());
-    // global_gradient.reinit(dof_handler.n_dofs());
-    // std::vector<Tensor<2, dim, double>> local_gradient(dofs_per_cell);
 
     for (const auto &cell : dof_handler.active_cell_iterators())
       {
@@ -613,16 +615,16 @@ class Translate: public Function<dim>
             
         cell->get_dof_indices(local_dof_indices);
 
-        for (unsigned int i = 0; i < dofs_per_cell; ++ i)
-        {
-          global_rotation[local_dof_indices[i]] += cell_rotation[i];
-          global_x_translation[local_dof_indices[i]] += local_x_translation[i];
-          global_y_translation[local_dof_indices[i]] += local_y_translation[i];
-        }
+        // for (unsigned int i = 0; i < dofs_per_cell; ++ i)
+        // {
+        //   global_rotation[local_dof_indices[i]] += cell_rotation[i];
+        //   global_x_translation[local_dof_indices[i]] += local_x_translation[i];
+        //   global_y_translation[local_dof_indices[i]] += local_y_translation[i];
+        // }
 
-        // constraints.distribute_local_to_global( cell_rotation,       local_dof_indices, global_rotation);
-        // constraints.distribute_local_to_global( local_x_translation, local_dof_indices, global_x_translation);
-        // constraints.distribute_local_to_global( local_y_translation, local_dof_indices, global_y_translation);
+        constraints.distribute_local_to_global( cell_rotation,       local_dof_indices, global_rotation);
+        constraints.distribute_local_to_global( local_x_translation, local_dof_indices, global_x_translation);
+        constraints.distribute_local_to_global( local_y_translation, local_dof_indices, global_y_translation);
 
       }
 
@@ -650,7 +652,6 @@ class Translate: public Function<dim>
     global_y_translation.reinit(dof_handler.n_dofs());
 
     VectorTools::interpolate(dof_handler, Rot<dim>(), global_rotation);
-    // global_rotation.print(std::cout);
     global_rotation /= global_rotation.l2_norm();
 
     VectorTools::interpolate(dof_handler, Translate<dim>(0), global_x_translation);
@@ -684,7 +685,7 @@ class Translate: public Function<dim>
   template <int dim>
   void ElasticProblem<dim>::solve()
   {
-    SolverControl            solver_control(1000, 1e-12);
+    SolverControl            solver_control(2000, 1e-12);
     SolverCG<Vector<double>> cg(solver_control);
     // SolverGMRES<Vector<double>> cg(solver_control);
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
@@ -694,16 +695,23 @@ class Translate: public Function<dim>
     // Defining Nullspace.
     nullspace.basis.clear();
 
-    // constraints.distribute(global_rotation);
-    // constraints.distribute(global_x_translation);
-    // constraints.distribute(global_y_translation);
+    // constraints.condense(global_rotation);
+    // constraints.condense(global_x_translation);
+    // constraints.condense(global_y_translation);
 
     // Adding vector to basis.            
-    nullspace.basis.push_back(global_rotation);
-    nullspace.basis.push_back(global_y_translation);
     nullspace.basis.push_back(global_x_translation);
+    nullspace.basis.push_back(global_y_translation);
+    nullspace.basis.push_back(global_rotation);
+
 
     nullspace.orthogonalize();
+
+
+    // constraints.condense(nullspace.basis[0]);
+    // constraints.condense(nullspace.basis[1]);
+    // constraints.condense(nullspace.basis[2]);
+
 
     // printf("Global rotation \n");
     // nullspace.basis[0].print(std::cout);
@@ -714,14 +722,17 @@ class Translate: public Function<dim>
     
 
     // Operator implementation.
-    if (false){
+    if (true){
+
         
         // Solving with null space removal
+        printf("Remove null space from right hand side: \n");
         nullspace.remove_nullspace(system_rhs);
         auto matrix_op = linear_operator(system_matrix);
         // auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
         auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
         cg.solve(matrix_op, solution, system_rhs, prec_op);
+        // solution.print(std::cout);
 
         // constraints.distribute(solution);
         // print_mean_value();
@@ -735,8 +746,11 @@ class Translate: public Function<dim>
 
         // Post processing.
         constraints.distribute(solution);
+
         // printf("Remove null space from solution: \n");
         nullspace.remove_nullspace(solution);
+
+        // solution.print(std::cout);
         // print_mean_value();
     }
 
@@ -828,14 +842,14 @@ class Translate: public Function<dim>
                               "exact",
                               interpretation);
 
-    // Vector<double> error_term = exact - solution;
-    // printf("error after projection is %f \n", error_term.l2_norm());
+    Vector<double> error_term = exact - solution;
+    printf("error after projection is %f \n", error_term.l2_norm());
     // error_term.print(std::cout);
 
-    // data_out.add_data_vector(dof_handler,
-    //                           error_term, 
-    //                           "Error",
-    //                           interpretation);
+    data_out.add_data_vector(dof_handler,
+                              error_term, 
+                              "Error",
+                              interpretation);
 
 
 
@@ -849,7 +863,7 @@ class Translate: public Function<dim>
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 6; ++cycle)
+    for (unsigned int cycle = 0; cycle < 5; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
