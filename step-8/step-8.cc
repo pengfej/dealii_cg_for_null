@@ -289,12 +289,12 @@ class Translate: public Function<dim>
     system_rhs.reinit(dof_handler.n_dofs());
 
     constraints.clear();
-    DoFTools::make_hanging_node_constraints(dof_handler, constraints);
+    // DoFTools::make_hanging_node_constraints(dof_handler, constraints);
 
     // Fixing three points or using exact boundary condition.
     if (true)
       {
-        // fixing_three_points();
+        fixing_three_points();
       }
       //std::cout << "Not fixing any points \n";
     else
@@ -312,8 +312,8 @@ class Translate: public Function<dim>
                                     constraints,
                                     /*keep_constrained_dofs = */ false);
 
-    setup_nullspace();
-    // interpolate_nullspace();
+    // setup_nullspace();
+    interpolate_nullspace();
 
     sparsity_pattern.copy_from(dsp);
     system_matrix.reinit(sparsity_pattern);
@@ -562,8 +562,7 @@ class Translate: public Function<dim>
 
     FEValues<dim> fe_values(fe,
                             quadrature_formula,
-                            update_values | update_gradients |
-                              update_quadrature_points | update_JxW_values);
+                            update_values | update_gradients |  update_JxW_values);
 
     const unsigned int dofs_per_cell = fe.n_dofs_per_cell();
 
@@ -615,16 +614,16 @@ class Translate: public Function<dim>
             
         cell->get_dof_indices(local_dof_indices);
 
-        // for (unsigned int i = 0; i < dofs_per_cell; ++ i)
-        // {
-        //   global_rotation[local_dof_indices[i]] += cell_rotation[i];
-        //   global_x_translation[local_dof_indices[i]] += local_x_translation[i];
-        //   global_y_translation[local_dof_indices[i]] += local_y_translation[i];
-        // }
+        for (unsigned int i = 0; i < dofs_per_cell; ++ i)
+        {
+          global_rotation[local_dof_indices[i]] += cell_rotation[i];
+          global_x_translation[local_dof_indices[i]] += local_x_translation[i];
+          global_y_translation[local_dof_indices[i]] += local_y_translation[i];
+        }
 
-        constraints.distribute_local_to_global( cell_rotation,       local_dof_indices, global_rotation);
-        constraints.distribute_local_to_global( local_x_translation, local_dof_indices, global_x_translation);
-        constraints.distribute_local_to_global( local_y_translation, local_dof_indices, global_y_translation);
+        // constraints.distribute_local_to_global( cell_rotation,       local_dof_indices, global_rotation);
+        // constraints.distribute_local_to_global( local_x_translation, local_dof_indices, global_x_translation);
+        // constraints.distribute_local_to_global( local_y_translation, local_dof_indices, global_y_translation);
 
       }
 
@@ -700,18 +699,23 @@ class Translate: public Function<dim>
     // constraints.condense(global_y_translation);
 
     // Adding vector to basis.            
+    nullspace.basis.push_back(global_rotation);
     nullspace.basis.push_back(global_x_translation);
     nullspace.basis.push_back(global_y_translation);
-    nullspace.basis.push_back(global_rotation);
-
 
     nullspace.orthogonalize();
-
 
     // constraints.condense(nullspace.basis[0]);
     // constraints.condense(nullspace.basis[1]);
     // constraints.condense(nullspace.basis[2]);
 
+    // printf("Norm of 0 %f \n", nullspace.basis[0].l2_norm());
+    // printf("Norm of 1 %f \n", nullspace.basis[1].l2_norm());
+    // printf("Norm of 2 %f \n", nullspace.basis[2].l2_norm());
+
+    // printf("between 0 and 1: %f \n", nullspace.basis[0]*nullspace.basis[1]);
+    // printf("between 0 and 2: %f \n", nullspace.basis[0]*nullspace.basis[2]);
+    // printf("between 1 and 2: %f \n", nullspace.basis[1]*nullspace.basis[2]);
 
     // printf("Global rotation \n");
     // nullspace.basis[0].print(std::cout);
@@ -722,11 +726,10 @@ class Translate: public Function<dim>
     
 
     // Operator implementation.
-    if (true){
-
+    if (false){
         
         // Solving with null space removal
-        printf("Remove null space from right hand side: \n");
+        // printf("Remove null space from right hand side: \n");
         nullspace.remove_nullspace(system_rhs);
         auto matrix_op = linear_operator(system_matrix);
         // auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
@@ -735,7 +738,7 @@ class Translate: public Function<dim>
         // solution.print(std::cout);
 
         // constraints.distribute(solution);
-        // print_mean_value();
+        print_mean_value();
     }
     else
     {
@@ -743,7 +746,7 @@ class Translate: public Function<dim>
 
         // Traditional Solve.
         cg.solve(system_matrix, solution, system_rhs, preconditioner);
-
+        
         // Post processing.
         constraints.distribute(solution);
 
@@ -751,7 +754,7 @@ class Translate: public Function<dim>
         nullspace.remove_nullspace(solution);
 
         // solution.print(std::cout);
-        // print_mean_value();
+        print_mean_value();
     }
 
         // //Print small examples to illustrate.
@@ -806,6 +809,10 @@ class Translate: public Function<dim>
                                                     cellwise_errors,
                                                     0.3,
                                                     0.03);
+
+    output_table.add_value("cells", triangulation.n_active_cells());
+    output_table.add_value("error", error_u);
+    output_table.add_value("MeanValue", mean_value);
 
     // triangulation.execute_coarsening_and_refinement();
     triangulation.refine_global();
@@ -863,7 +870,7 @@ class Translate: public Function<dim>
   template <int dim>
   void ElasticProblem<dim>::run()
   {
-    for (unsigned int cycle = 0; cycle < 5; ++cycle)
+    for (unsigned int cycle = 0; cycle < 6; ++cycle)
       {
         std::cout << "Cycle " << cycle << ':' << std::endl;
 
@@ -917,9 +924,7 @@ class Translate: public Function<dim>
         output_results(cycle);
 
 
-        output_table.add_value("cells", triangulation.n_active_cells());
-        output_table.add_value("error", error_u);
-        output_table.add_value("MeanValue", mean_value);
+
 
       }
 
