@@ -217,7 +217,7 @@ namespace Step11
 
     mean_value_constraints.clear();  
     DoFTools::make_hanging_node_constraints(dof_handler, mean_value_constraints);
-    mean_value_constraints.add_line(0);
+    // mean_value_constraints.add_line(0);
     // for (unsigned int i = 1; i < dof_handler.n_dofs(); ++i)
     //   mean_value_constraints.add_entry(0, i, -1 * global_constraint[i]);
     mean_value_constraints.close();
@@ -433,16 +433,17 @@ namespace Step11
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
-    if (false){
+    if (true){
       // Defining Nullspace.  
       Nullspace<VectorType> nullspace;
 
-      Vector<double> global_constraint(dof_handler.n_dofs());
-      for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
-        global_constraint(i) += 1; 
-      }
+      // Vector<double> global_constraint(dof_handler.n_dofs());
+      // for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
+      //   global_constraint(i) += 1; 
+      // }
 
       global_constraint /= global_constraint.l2_norm();
+      global_constraint.print(std::cout);
       nullspace.basis.push_back(global_constraint);
 
       // original matrix, but projector after preconditioner
@@ -539,7 +540,7 @@ namespace Step11
         }
 
 
-    for (unsigned int cycle = 0; cycle < 8; ++cycle)
+    for (unsigned int cycle = 0; cycle < 6; ++cycle)
       {
         setup_system();
         assemble_and_solve();
