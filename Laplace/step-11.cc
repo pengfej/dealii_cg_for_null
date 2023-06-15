@@ -31,6 +31,7 @@
 
 
 #include <boost/container/vector.hpp>
+#include <deal.II/lac/sparse_ilu.h>
 #include <boost/integer.hpp>
 #include <deal.II/base/numbers.h>
 #include <deal.II/base/quadrature_lib.h>
@@ -231,7 +232,7 @@ namespace Step11
                                     mean_value_constraints, 
                                     /*keep_constrained_dofs = */ false);
 
-    // DoFTools::make_sparsity_pattern(dof_handler, dsp);
+    DoFTools::make_sparsity_pattern(dof_handler, dsp);
 
     mean_value_constraints.condense(dsp);
 
@@ -434,21 +435,25 @@ namespace Step11
     SolverControl            solver_control(2500, 1e-12);
     SolverCG<VectorType>     solver(solver_control);
 
-    PreconditionSSOR<SparseMatrix<double>> preconditioner;
-    preconditioner.initialize(system_matrix, 1.2);
+    SparseILU<double> preconditioner;
+    preconditioner.initialize(system_matrix,
+                              SparseILU<double>::AdditionalData(1e-3));
+
+    // PreconditionSSOR<SparseMatrix<double>> preconditioner;
+    // preconditioner.initialize(system_matrix, 1.2);
 
     if (true){
       // Defining Nullspace.  
       Nullspace<VectorType> nullspace;
 
-      Vector<double> all_one_constraint(dof_handler.n_dofs());
-      for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
-        all_one_constraint(i) += 1; 
-      }
+      // Vector<double> all_one_constraint(dof_handler.n_dofs());
+      // for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
+      //   all_one_constraint(i) += 1; 
+      // }
 
-      all_one_constraint /= all_one_constraint.l2_norm();
+      global_constraint /= global_constraint.l2_norm();
       // global_constraint.print(std::cout);
-      nullspace.basis.push_back(all_one_constraint);
+      nullspace.basis.push_back(global_constraint);
 
       // original matrix, but projector after preconditioner
       // auto matrix_op = my_operator(linear_operator(system_matrix), nullspace);
@@ -456,9 +461,8 @@ namespace Step11
       auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
 
       // remove nullspace from RHS
-      double r=system_rhs*all_one_constraint;
-      system_rhs.add(-1.0*r, all_one_constraint);
-      // std::cout << "r=" << r << std::endl;
+      double r=system_rhs*global_constraint;
+      system_rhs.add(-1.0*r, global_constraint);
       solver.solve(system_matrix, solution, system_rhs, preconditioner);
       // solver.solve(matrix_op, solution, system_rhs, prec_op);
       // mean_value_constraints.distribute(solution);

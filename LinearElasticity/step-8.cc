@@ -21,6 +21,7 @@
 // @sect3{Include files}
 #include <bits/types/error_t.h>
 #include <boost/container/detail/construct_in_place.hpp>
+#include <deal.II/lac/sparse_ilu.h>
 #include <cmath>
 #include <deal.II/base/numbers.h>
 #include <deal.II/base/point.h>
@@ -103,7 +104,7 @@ namespace Step8
     for (unsigned int n = 0; n < basis.size(); ++n)
     {
       const double tmp_rhs_inner_product = (basis[n]*input_vector)/(basis[n]*basis[n]);
-      // printf("Removal %f \n", tmp_rhs_inner_product);
+      printf("Removal %f \n", tmp_rhs_inner_product);
       input_vector.add(-1*tmp_rhs_inner_product, basis[n]);
     }
   }
@@ -699,12 +700,17 @@ class Translate: public Function<dim>
   template <int dim>
   void ElasticProblem<dim>::solve()
   {
-    SolverControl            solver_control(2000, 1e-12);
+    SolverControl            solver_control(2000, 1e-8*system_rhs.l2_norm());
     SolverCG<Vector<double>> cg(solver_control);
     // SolverGMRES<Vector<double>> cg(solver_control);
+
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
-    
-    preconditioner.initialize(system_matrix, 1.0);
+    preconditioner.initialize(system_matrix, 1.2);
+
+
+    // SparseILU<double> preconditioner;
+    // preconditioner.initialize(system_matrix,
+    //                           SparseILU<double>::AdditionalData(1e-3));
 
 
     // Defining Nullspace.
@@ -719,9 +725,9 @@ class Translate: public Function<dim>
     // constraints.distribute(global_y_translation);
 
     // Adding vector to basis.            
-    nullspace.basis.push_back(global_rotation);
     nullspace.basis.push_back(global_x_translation);
     nullspace.basis.push_back(global_y_translation);
+    nullspace.basis.push_back(global_rotation);
 
     nullspace.orthogonalize();
     
@@ -781,7 +787,7 @@ class Translate: public Function<dim>
         nullspace.basis.push_back(global_rotation);
         nullspace.basis.push_back(global_x_translation);
         nullspace.basis.push_back(global_y_translation);
-        nullspace.orthogonalize();
+        // nullspace.orthogonalize();
         // constraints.distribute(nullspace.basis[0]);
         // constraints.distribute(nullspace.basis[1]);
         // constraints.distribute(nullspace.basis[2]);
@@ -942,23 +948,23 @@ class Translate: public Function<dim>
                               ExactSolution<dim>(),
                               exact);
 
-    // printf("Remove null from exact: \n");
-    // nullspace.remove_nullspace(exact);
+    printf("Remove null from exact: \n");
+    nullspace.remove_nullspace(exact);
     // constraints.distribute(exact);
     // Vector<double> error_term = exact - solution;
     // nullspace.remove_nullspace(error_term);
     // constraints.distribute(error_term);
 
-    error_u = // error_term.l2_norm();
-      VectorTools::compute_global_error(triangulation,
+    // error_u = error_term.l2_norm();
+    error_u = VectorTools::compute_global_error(triangulation,
                                         cellwise_errors,
                                         VectorTools::L2_norm);
 
 
-    GridRefinement::refine_and_coarsen_fixed_number(triangulation,
-                                                    cellwise_errors,
-                                                    0.3,
-                                                    0.03);
+    // GridRefinement::refine_and_coarsen_fixed_number(triangulation,
+    //                                                 cellwise_errors,
+    //                                                 0.3,
+    //                                                 0.03);
 
     output_table.add_value("cells", triangulation.n_active_cells());
     output_table.add_value("error", error_u);
@@ -1064,7 +1070,7 @@ class Translate: public Function<dim>
           {
             GridGenerator::hyper_cube(triangulation, 0, 1);
             // Colorize will setup atuo.
-            triangulation.refine_global(2);
+            triangulation.refine_global(1);
             if (true)
             for (const auto &cell : triangulation.cell_iterators())
             {
