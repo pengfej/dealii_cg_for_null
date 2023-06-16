@@ -19,6 +19,7 @@
 
 
 // @sect3{Include files}
+#include <deal.II/base/timer.h>
 #include <bits/types/error_t.h>
 #include <boost/container/detail/construct_in_place.hpp>
 #include <deal.II/lac/sparse_ilu.h>
@@ -170,9 +171,9 @@ namespace Step8
                              std::cos(pi*x1)    * 
                              std::sin(pi*x2);
 
-      values[pt][1] = -1* pi*pi*std::cos(pi*x1) *
+      values[pt][1] = -1*pi2*std::cos(pi*x1) *
                         std::cos(pi * x2)     +
-                        2*pi*pi*(1/lambda_scalar + 1)    *
+                        2*pi2*(1/lambda_scalar + 1)*
                         std::sin(pi*x1)       *
                         std::cos(pi*x2);
     }
@@ -229,11 +230,11 @@ class Translate: public Function<dim>
                                 const double uy = p[1];
 
                                 values[0] = (-1 * std::sin(pi*ux) + 
-                                1/lambda_scalar * std::cos(pi*ux)) *
-                                                  std::sin(pi*uy) + 4/pi2;
+                                1/lambda_scalar * std::cos(pi*ux))*
+                                                  std::sin(pi*uy) + 0.40528473461;
 
-                                values[1] = (-1 * std::cos(pi * ux) + 
-                                1/lambda_scalar * std::sin(pi*ux)) *
+                                values[1] = (-1 * std::cos(pi*ux) + 
+                                1/lambda_scalar * std::sin(pi*ux))*
                                                   std::cos(pi*uy);
                               }
   };
@@ -278,6 +279,8 @@ class Translate: public Function<dim>
 
     double mean_value = 0.0;
     double error_u;
+    double walltime, cputime;
+    unsigned int n_step;
   };
 
   template <int dim>
@@ -292,6 +295,9 @@ class Translate: public Function<dim>
     dof_handler.distribute_dofs(fe);
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
+    walltime = 0;
+    n_step = 0;
+    cputime = 0;
 
     constraints.clear();
     DoFTools::make_hanging_node_constraints(dof_handler, constraints);
@@ -299,7 +305,7 @@ class Translate: public Function<dim>
     // Fixing three points or using exact boundary condition.
     if (true)
       {
-        // fixing_three_points();
+        fixing_three_points();
       }
       //std::cout << "Not fixing any points \n";
     else
@@ -581,7 +587,13 @@ class Translate: public Function<dim>
     global_x_translation.reinit(dof_handler.n_dofs());
     global_y_translation.reinit(dof_handler.n_dofs());
 
+    // Vector<dim> tmp; 
+    Tensor<1, 1> tmp;
+    tmp = 0;
+
     std::vector<types::global_dof_index> local_dof_indices(dofs_per_cell);
+
+    const FEValuesExtractors::Vector velocities (0);
 
     for (const auto &cell : dof_handler.active_cell_iterators())
       {
@@ -598,10 +610,13 @@ class Translate: public Function<dim>
                 {
                   const unsigned int component_i = fe.system_to_component_index(i).first;
 
-                  double tmp_grad_xy = fe_values.shape_grad_component(i, q_point, 0)[1]* fe_values.JxW(q_point);
-                  double tmp_grad_yx = fe_values.shape_grad_component(i, q_point, 1)[0]* fe_values.JxW(q_point);
+                  // double tmp_grad_xy = fe_values.shape_grad_component(i, q_point, 0)[1]* fe_values.JxW(q_point);
+                  // double tmp_grad_yx = fe_values.shape_grad_component(i, q_point, 1)[0]* fe_values.JxW(q_point);
+                  tmp = fe_values[velocities].curl(i, q_point);
 
-                  cell_rotation[i] += tmp_grad_xy - tmp_grad_yx;
+                  // fe_values.get_function_gradients()
+
+                  cell_rotation[i] += tmp[0];
 
                   // printf("On dof %d with q_point %d, the gradient value is %f \n", i, q_point, tmp_grad_xy - tmp_grad_yx);
 
@@ -753,10 +768,12 @@ class Translate: public Function<dim>
     // nullspace.basis[1].print(std::cout);
     // printf("Global y \n");
     // nullspace.basis[2].print(std::cout);
+
+    Timer timer;
     
 
     // Operator implementation.
-    if (true){
+    if (false){
         
         // Solving with null space removal
         // printf("Remove null space from right hand side: \n");
@@ -766,6 +783,8 @@ class Translate: public Function<dim>
         auto prec_op = my_operator(linear_operator(preconditioner), nullspace);
         cg.solve(matrix_op, solution, system_rhs, prec_op);
         // cg.solve(system_matrix, solution, system_rhs, preconditioner);
+        
+        timer.stop(); 
 
         // solution.print(std::cout); 
         // constraints.distribute(solution);
@@ -787,7 +806,7 @@ class Translate: public Function<dim>
         nullspace.basis.push_back(global_rotation);
         nullspace.basis.push_back(global_x_translation);
         nullspace.basis.push_back(global_y_translation);
-        // nullspace.orthogonalize();
+        nullspace.orthogonalize();
         // constraints.distribute(nullspace.basis[0]);
         // constraints.distribute(nullspace.basis[1]);
         // constraints.distribute(nullspace.basis[2]);
@@ -843,6 +862,9 @@ class Translate: public Function<dim>
     {
         // Traditional Solve.
         cg.solve(system_matrix, solution, system_rhs, preconditioner);
+
+        
+       timer.stop(); 
 
         // Post processing.
         constraints.distribute(solution);
@@ -927,6 +949,23 @@ class Translate: public Function<dim>
         // constraints.condense(global_x_translation);
         // constraints.condense(global_y_translation);
 
+        
+ 
+
+      n_step = solver_control.last_step();
+      // printf("last step is: %d", n_step);
+
+      cputime = timer.cpu_time();
+      walltime =  timer.wall_time();
+
+
+      // std::cout << "Solving CPU time " << timer.cpu_time() << " seconds.\n";
+      // std::cout << "Solving wall time: " << timer.wall_time() << " seconds.\n";
+
+      
+      // reset timer for the next thing it shall do
+      timer.reset();
+
   }
 
 
@@ -968,7 +1007,10 @@ class Translate: public Function<dim>
 
     output_table.add_value("cells", triangulation.n_active_cells());
     output_table.add_value("error", error_u);
-    output_table.add_value("MeanValue", mean_value);
+    // output_table.add_value("MeanValue", mean_value);
+    output_table.add_value("cputime", cputime);
+    // output_table.add_value("walltime", walltime);
+    output_table.add_value("Iterations", n_step);
 
     // triangulation.execute_coarsening_and_refinement();
     triangulation.refine_global();
@@ -1122,7 +1164,9 @@ class Translate: public Function<dim>
 
 
     output_table.set_precision("error", 6);
-    output_table.set_precision("MeanValue", 6);
+    // output_table.set_precision("MeanValue", 6);
+    // output_table.set_precision("cputime", 6);
+    // output_table.set_precision("walltime", 6);
     output_table.write_text(std::cout);
   }
 }

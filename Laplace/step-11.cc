@@ -31,6 +31,7 @@
 
 
 #include <boost/container/vector.hpp>
+#include <deal.II/base/timer.h>
 #include <deal.II/lac/sparse_ilu.h>
 #include <boost/integer.hpp>
 #include <deal.II/base/numbers.h>
@@ -190,6 +191,10 @@ namespace Step11
     Vector<double> global_constraint;
 
     TableHandler output_table;
+
+    
+    double walltime, cputime;
+    unsigned int n_step;
   };
 
 
@@ -214,11 +219,14 @@ namespace Step11
     solution.reinit(dof_handler.n_dofs());
     system_rhs.reinit(dof_handler.n_dofs());
     global_constraint.reinit(dof_handler.n_dofs());
+    cputime = 0;
+    walltime = 0;
+    n_step = 0;
 
 
     mean_value_constraints.clear();  
     DoFTools::make_hanging_node_constraints(dof_handler, mean_value_constraints);
-    // mean_value_constraints.add_line(0);
+    mean_value_constraints.add_line(0);
     // for (unsigned int i = 1; i < dof_handler.n_dofs(); ++i)
     //   mean_value_constraints.add_entry(0, i, -1 * global_constraint[i]);
     mean_value_constraints.close();
@@ -419,9 +427,13 @@ namespace Step11
                                                     0.3,
                                                     0.03);
 
+    
     output_table.add_value("cells", triangulation.n_active_cells());
     output_table.add_value("error", norm);
-    output_table.add_value("MeanValue", mean_value);
+    // output_table.add_value("MeanValue", mean_value);
+    output_table.add_value("cputime", cputime);
+    // output_table.add_value("walltime", walltime);
+    output_table.add_value("Iterations", n_step);
     // printf("after table \n");
 
 
@@ -435,14 +447,16 @@ namespace Step11
     SolverControl            solver_control(2500, 1e-12);
     SolverCG<VectorType>     solver(solver_control);
 
-    SparseILU<double> preconditioner;
-    preconditioner.initialize(system_matrix,
-                              SparseILU<double>::AdditionalData(1e-3));
+    // SparseILU<double> preconditioner;
+    // preconditioner.initialize(system_matrix,
+    //                           SparseILU<double>::AdditionalData(1e-3));
 
-    // PreconditionSSOR<SparseMatrix<double>> preconditioner;
-    // preconditioner.initialize(system_matrix, 1.2);
+    PreconditionSSOR<SparseMatrix<double>> preconditioner;
+    preconditioner.initialize(system_matrix, 1.2);
 
-    if (true){
+    Timer timer;
+
+    if (false){
       // Defining Nullspace.  
       Nullspace<VectorType> nullspace;
 
@@ -463,7 +477,12 @@ namespace Step11
       // remove nullspace from RHS
       double r=system_rhs*global_constraint;
       system_rhs.add(-1.0*r, global_constraint);
-      solver.solve(system_matrix, solution, system_rhs, preconditioner);
+      
+
+      // solver.solve(system_matrix, solution, system_rhs, preconditioner);
+      solver.solve(matrix_op, solution, system_rhs, prec_op);
+      
+      timer.stop(); 
       // solver.solve(matrix_op, solution, system_rhs, prec_op);
       // mean_value_constraints.distribute(solution);
 
@@ -477,8 +496,11 @@ namespace Step11
       }
 
       global_constraint /= global_constraint.l2_norm();
+      
 
       solver.solve(system_matrix, solution, system_rhs, preconditioner);
+      
+      timer.stop(); 
       
       mean_value_constraints.distribute(solution);
       // global_constraint /= global_constraint.l2_norm();
@@ -488,6 +510,13 @@ namespace Step11
       solution.add(-1 * solution_inner, global_constraint);
 
     }
+
+
+    n_step = solver_control.last_step();
+
+    cputime = timer.cpu_time();
+    walltime =  timer.wall_time();
+
     
   }
 
@@ -563,7 +592,7 @@ namespace Step11
       }
 
     output_table.set_precision("error", 6);
-    output_table.set_precision("MeanValue", 6);
+    // output_table.set_precision("MeanValue", 6);
     output_table.write_text(std::cout);
     // std::cout << std::endl;
   }
