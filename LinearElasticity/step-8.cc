@@ -17,8 +17,9 @@
  * Author: Wolfgang Bangerth, University of Heidelberg, 2000
  */
 
+//  Note: About 80% of the original program, step-8, are modified.
 
-// @sect3{Include files}
+
 #include <deal.II/base/timer.h>
 #include <bits/types/error_t.h>
 #include <boost/container/detail/construct_in_place.hpp>
@@ -334,26 +335,13 @@ class Translate: public Function<dim>
   void ElasticProblem<dim>::fixing_three_points()
   {
 
-    // So far the best pair for lambda = 2; (1)
-    // const Point<dim, double> location_1(0.25,0.5);
-    // const Point<dim, double> location_2(1.00,0.5);
 
-    // For lambda = 10: (2)
-    // const Point<dim, double> location_1(0.25,0.25);
-    // const Point<dim, double> location_2(0.75,0.25);
-
-    // Not very ideal, used to compare: (3)
     const Point<dim, double> location_1(0.0,0.0); // fix x
     const Point<dim, double> location_2(1.0,0.0); // fix y
-    // const Point<dim, double> location_3(1.0,1.0); // fix y
 
-    // definitely gonna be there. (4)
+    // Other options for fixing DoFs.
     // const Point<dim, double> location_1(0.0,0.0);
     // const Point<dim, double> location_2(1.0,1.0);
-
-    // tradition:(5)
-    // const Point<dim, double> location_1(0.0, 0.5);
-    // const Point<dim, double> location_2(1.0, 0.5);
 
     ComponentMask x_direction(2, false);
     x_direction.set(0, true);
@@ -717,27 +705,13 @@ class Translate: public Function<dim>
   {
     SolverControl            solver_control(2000, 1e-8*system_rhs.l2_norm());
     SolverCG<Vector<double>> cg(solver_control);
-    // SolverGMRES<Vector<double>> cg(solver_control);
 
     PreconditionSSOR<SparseMatrix<double>> preconditioner;
     preconditioner.initialize(system_matrix, 1.2);
 
 
-    // SparseILU<double> preconditioner;
-    // preconditioner.initialize(system_matrix,
-    //                           SparseILU<double>::AdditionalData(1e-3));
-
-
     // Defining Nullspace.
     nullspace.basis.clear();
-
-    // constraints.set_zero(global_rotation);
-    // constraints.set_zero(global_x_translation);
-    // constraints.set_zero(global_y_translation);
-
-    // constraints.distribute(global_rotation);
-    // constraints.distribute(global_x_translation);
-    // constraints.distribute(global_y_translation);
 
     // Adding vector to basis.            
     nullspace.basis.push_back(global_x_translation);
@@ -745,29 +719,6 @@ class Translate: public Function<dim>
     nullspace.basis.push_back(global_rotation);
 
     nullspace.orthogonalize();
-    
-    // constraints.set_zero(nullspace.basis[0]);
-    // constraints.set_zero(nullspace.basis[1]);
-    // constraints.set_zero(nullspace.basis[2]);
-
-    // constraints.distribute(nullspace.basis[0]);
-    // constraints.distribute(nullspace.basis[1]);
-    // constraints.distribute(nullspace.basis[2]);
-
-    // printf("Norm of 0 %f \n", nullspace.basis[0].l2_norm());
-    // printf("Norm of 1 %f \n", nullspace.basis[1].l2_norm());
-    // printf("Norm of 2 %f \n", nullspace.basis[2].l2_norm());
-
-    // printf("between 0 and 1: %f \n", nullspace.basis[0]*nullspace.basis[1]);
-    // printf("between 0 and 2: %f \n", nullspace.basis[0]*nullspace.basis[2]);
-    // printf("between 1 and 2: %f \n", nullspace.basis[1]*nullspace.basis[2]);
-
-    // printf("Global rotation \n");
-    // nullspace.basis[0].print(std::cout);
-    // printf("Global x \n");
-    // nullspace.basis[1].print(std::cout);
-    // printf("Global y \n");
-    // nullspace.basis[2].print(std::cout);
 
     Timer timer;
     
@@ -785,75 +736,16 @@ class Translate: public Function<dim>
         // cg.solve(system_matrix, solution, system_rhs, preconditioner);
         
         timer.stop(); 
-
-        // solution.print(std::cout); 
-        // constraints.distribute(solution);
-
-        //=================================
-        // Remove int_u = int_curl = 0.
-        //=================================
-
         interpolate_nullspace();
-        // constraints.set_zero(global_rotation);
-        // constraints.set_zero(global_x_translation);
-        // constraints.set_zero(global_y_translation);
-        // printf("Afterward Removal \n");
-        // setup_nullspace();
-        // constraints.distribute(global_rotation);
-        // constraints.distribute(global_x_translation);
-        // constraints.distribute(global_y_translation);
+
         nullspace.basis.clear();      
         nullspace.basis.push_back(global_rotation);
         nullspace.basis.push_back(global_x_translation);
         nullspace.basis.push_back(global_y_translation);
         nullspace.orthogonalize();
-        // constraints.distribute(nullspace.basis[0]);
-        // constraints.distribute(nullspace.basis[1]);
-        // constraints.distribute(nullspace.basis[2]);
 
         // printf("Remove null space from solution: \n");
         nullspace.remove_nullspace(solution); 
-
-        // Distribute after all removal
-        // constraints.distribute(solution);
-
-        // ======================================================
-        // Compute mean value of x and y overall and remove it.
-        // ======================================================
-
-        // QGauss<dim> quadrature_formula(fe.degree + 1);
-
-        // FEValues<dim> fe_values(fe,
-        //                         quadrature_formula,
-        //                         update_values | update_gradients |
-        //                           update_quadrature_points | update_JxW_values);
-
-        // double mean_value_x = VectorTools::compute_mean_value(fe_values.get_mapping() , dof_handler, fe_values.get_quadrature(), solution, 0);
-        // double mean_value_y = VectorTools::compute_mean_value(fe_values.get_mapping() , dof_handler, fe_values.get_quadrature(), solution, 1);
-        
-        // // solution.add(mean_value_x);
-        // // solution.add(mean_value_y);
-
-        // Vector<double> x_plot;
-        // Vector<double> y_plot;
-        // x_plot.reinit(dof_handler.n_dofs());
-        // y_plot.reinit(dof_handler.n_dofs());
-
-        // for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
-        //   if (i % 2 == 1)
-        //     x_plot(i) += mean_value_x;
-        //   else
-        //     y_plot(i) += mean_value_y;
-        // }
-
-        // // x_plot /= x_plot.l2_norm();
-        // // y_plot /= y_plot.l2_norm();
-
-        // double tmp_sx = solution * x_plot;
-        // solution.add(-tmp_sx, x_plot);
-
-        // double tmp_sy = solution * y_plot;
-        // solution.add(-tmp_sy, y_plot);
 
         print_mean_value();
 
@@ -870,49 +762,9 @@ class Translate: public Function<dim>
         constraints.distribute(solution);
         nullspace.remove_nullspace(solution); 
 
-        // QGauss<dim> quadrature_formula(fe.degree + 1);
-
-        // FEValues<dim> fe_values(fe,
-        //                         quadrature_formula,
-        //                         update_values | update_gradients |
-        //                           update_quadrature_points | update_JxW_values);
-
-        // double mean_value_x = VectorTools::compute_mean_value(fe_values.get_mapping() , dof_handler, fe_values.get_quadrature(), solution, 0);
-        // double mean_value_y = VectorTools::compute_mean_value(fe_values.get_mapping() , dof_handler, fe_values.get_quadrature(), solution, 1);
-        
-        // constraints.set_zero(global_x_translation);
-        // constraints.set_zero(global_y_translation);
-        // solution.add(-mean_value_x, global_x_translation);
-        // solution.add(-0.35, global_y_translation);
-
-        // Vector<double> x_plot;
-        // Vector<double> y_plot;
-        // x_plot.reinit(dof_handler.n_dofs());
-        // y_plot.reinit(dof_handler.n_dofs());
-
-        // for (unsigned int i = 0; i < dof_handler.n_dofs(); ++i){
-        //   if (i % 2 == 1)
-        //     x_plot(i) += mean_value_x;
-        //   else
-        //     y_plot(i) += mean_value_y;
-        // }
-
-        // // x_plot /= x_plot.l2_norm();
-        // // y_plot /= y_plot.l2_norm();
-
-        // // double tmp_sx = solution * x_plot;
-        // solution.add(-1, x_plot);
-
-        // // double tmp_sy = solution * y_plot;
-        // solution.add(-1, y_plot);
 
         interpolate_nullspace();
-        // constraints.distribute(global_rotation);
-        // constraints.distribute(global_x_translation);
-        // constraints.distribute(global_y_translation);
-        // constraints.set_zero(global_rotation);
-        // constraints.set_zero(global_x_translation);
-        // constraints.set_zero(global_y_translation);
+
         nullspace.basis.clear();      
         nullspace.basis.push_back(global_rotation);
         nullspace.basis.push_back(global_x_translation);
@@ -928,41 +780,12 @@ class Translate: public Function<dim>
         print_mean_value();
     }
 
-        // //Print small examples to illustrate.
-        // printf("printing system matrix \n");
-        // FullMatrix<double> tmp;
-        // tmp.copy_from(system_matrix);
-        // system_matrix.print(std::cout);
-        // printf("Now print right hand side: \n");
-        // system_rhs.print(std::cout);
-        // printf("Global rotation \n");
-        // global_rotation.print(std::cout);
-        // printf("Global x \n");
-        // global_x_translation.print(std::cout);
-        // printf("Global y \n");
-        // global_y_translation.print(std::cout);
-        // printf("Checking if null space is orthogonal: \n");
-        // printf("X and Y: %4f " , global_x_translation*global_y_translation);
-        // printf("X and R: %4f " , global_x_translation*global_rotation);
-        // printf("R and Y: %4f " , global_rotation*global_y_translation);    
-        // constraints.condense(global_rotation);
-        // constraints.condense(global_x_translation);
-        // constraints.condense(global_y_translation);
-
-        
- 
-
       n_step = solver_control.last_step();
       // printf("last step is: %d", n_step);
 
       cputime = timer.cpu_time();
       walltime =  timer.wall_time();
 
-
-      // std::cout << "Solving CPU time " << timer.cpu_time() << " seconds.\n";
-      // std::cout << "Solving wall time: " << timer.wall_time() << " seconds.\n";
-
-      
       // reset timer for the next thing it shall do
       timer.reset();
 
@@ -1031,68 +854,6 @@ class Translate: public Function<dim>
                               solution,
                               solution_names,
                               interpretation);
-
-
-    // Vector<double> exact(dof_handler.n_dofs());
-    // VectorTools::interpolate(dof_handler, 
-    //                           ExactSolution<dim>(),
-    //                           exact);
-
-    // printf("Remove nullspace from exact. \n");
-    // nullspace.remove_nullspace(exact);
-    // constraints.distribute(exact);
-    // exact.print(std::cout);
-
-    // data_out.add_data_vector(dof_handler,
-    //                          exact,
-    //                           "exact",
-    //                           interpretation);
-
-    // Vector<double> error_term = exact - solution;
-    
-    // nullspace.remove_nullspace(error_term);
-    // constraints.distribute(error_term);
-    // printf("error after projection is %f \n", error_term.l2_norm());
-    // error_term.print(std::cout);
-
-    // data_out.add_data_vector(dof_handler,
-    //                           error_term, 
-    //                           "Error",
-    //                           interpretation);
-
-
-    // data_out.add_data_vector(dof_handler,
-    //                           global_rotation, 
-    //                           "rot_int",
-    //                           interpretation);
-
-
-    // data_out.add_data_vector(dof_handler,
-    //                           global_x_translation, 
-    //                           "x_int",
-    //                           interpretation);
-
-
-    // data_out.add_data_vector(dof_handler,
-    //                           global_y_translation, 
-    //                           "y_int",
-    //                           interpretation);
-
-
-    // data_out.add_data_vector(dof_handler,
-    //                           nullspace.basis[0], 
-    //                           "rot_null",
-    //                           interpretation);
-
-    // data_out.add_data_vector(dof_handler,
-    //                           nullspace.basis[1], 
-    //                           "x_null",
-    //                           interpretation);
-
-    // data_out.add_data_vector(dof_handler,
-    //                           nullspace.basis[2], 
-    //                           "y_null",
-    //                           interpretation);
 
     data_out.build_patches();
 

@@ -17,18 +17,7 @@
  * Author: Wolfgang Bangerth, University of Heidelberg, 2001
  */
 
-/*
-
-- get working with one vector in the nullspace
-- test a) use 1 for boundary dofs, 0 else
-- test b) use all 1.
-- move project() into Nullspace struct
-- try out GMRES
-
-- put into ASPECT
-
- */
-
+//  Note: About 40% of the original program, step-11, are modified.
 
 #include <boost/container/vector.hpp>
 #include <deal.II/base/timer.h>
@@ -80,7 +69,9 @@ namespace Step11
     std::vector<VectorType> basis;
   };
   
-  
+  // Define null space removal operator.
+  // Takes a linear operator and a nullspace object as input
+  // and return another linear operator.
   template <typename Range, typename Domain, typename Payload, class VectorType>
   LinearOperator<Range, Domain, Payload>
   my_operator(const LinearOperator<Range, Domain, Payload> &op,
@@ -91,6 +82,8 @@ namespace Step11
       return_op.reinit_range_vector  = op.reinit_range_vector;
       return_op.reinit_domain_vector = op.reinit_domain_vector;
 
+      // Modification of vmult function by adding projection after each 
+      // matrix vector multiplication.
       return_op.vmult = [&](Range &dest, const Domain &src) {
           op.vmult(dest, src);   // dest = Phi(src)
 
@@ -124,6 +117,8 @@ namespace Step11
       return return_op;
   }
 
+
+  // Define exact solution as deal.II function.
   template <int dim>
   class Solution : public Function<dim>
   {
@@ -142,7 +137,7 @@ namespace Step11
   }
  
  
- 
+  // Define right hand side as deal.II function.
   template <int dim>
   class RightHandSide : public Function<dim>
   {
@@ -224,6 +219,7 @@ namespace Step11
     n_step = 0;
 
 
+    // Define constraint by fixing one DoF.
     mean_value_constraints.clear();  
     DoFTools::make_hanging_node_constraints(dof_handler, mean_value_constraints);
     mean_value_constraints.add_line(0);
@@ -399,11 +395,6 @@ namespace Step11
                                                         QGauss<dim>(gauss_degree),
                                                         solution, 
                                                         0);
-
-
-    // solution.add(-mean_value);
-
-
 
     Vector<double> cellwise_error(triangulation.n_active_cells());
     QGauss<dim> quadrature(gauss_degree);

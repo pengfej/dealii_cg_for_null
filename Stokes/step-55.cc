@@ -17,6 +17,8 @@
  * Author: Timo Heister, Clemson University, 2016
  */
 
+//  Note: About 5% of the original program, step-55, are modified.
+
 #include <deal.II/base/quadrature_lib.h>
 #include <deal.II/base/function.h>
 #include <deal.II/base/timer.h>
